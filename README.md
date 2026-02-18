@@ -3,7 +3,7 @@
 Use this project to let Grais read data from the **active Chrome tab** through a local relay.
 
 ## What runs where
-- Extension (`background.js`): attaches/detaches the active tab.
+- Extension (`extension/background.js`): attaches/detaches the active tab.
 - Relay (`relay-server.js`): local bridge on `127.0.0.1:18792`.
 - Reader (`scripts/read-active-tab.js`): executes reads and prints JSON.
 
@@ -11,7 +11,7 @@ Use this project to let Grais read data from the **active Chrome tab** through a
 1. Load extension in Chrome:
    - Open `chrome://extensions`
    - Enable Developer mode
-   - Load unpacked from this repository
+   - Load unpacked from `/Users/mathiasasberg/Projects/grais/api+chrome/chrome-debugger/extension`
    - Pin Grais Debugger icon
 2. Install dependencies:
 

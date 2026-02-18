@@ -23,11 +23,11 @@ Use this skill to attach to the active Chrome tab through the bundled Grais Debu
    node scripts/relay-manager.js start --auto-stop-ms 0
    ```
 
-2. Load extension from this folder in Chrome
+2. Load extension from the `extension/` subfolder in Chrome
 
    - `chrome://extensions`
    - Enable developer mode
-   - Load unpacked from this repo root
+   - Load unpacked from `/Users/mathiasasberg/Projects/grais/api+chrome/chrome-debugger/extension`
 
 3. Attach the extension to the target tab (click toolbar icon)
 

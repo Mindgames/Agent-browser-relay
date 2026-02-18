@@ -22,7 +22,7 @@ This repository provides a local browser-relay so Grais can attach to the **acti
 1. Install and open extension
    - Chrome → `chrome://extensions`
    - Enable Developer mode
-   - Load unpacked and select this folder
+   - Load unpacked and select `/Users/mathiasasberg/Projects/grais/api+chrome/chrome-debugger/extension`
    - Pin Grais Debugger icon to the toolbar
 2. Start relay server:
 
