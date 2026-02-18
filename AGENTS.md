@@ -53,10 +53,10 @@ Expect `extensionConnected: true` and low queue depth before running fetches.
 3. Validate readiness before each read:
 
    ```bash
-   node /Users/mathiasasberg/.codex/skills/private/grais-tab-webdata-reader/scripts/read-active-tab.js --check
+   node scripts/read-active-tab.js --check
    ```
    ```bash
-   node /Users/mathiasasberg/.codex/skills/private/grais-tab-webdata-reader/scripts/read-active-tab.js --check --wait-for-attach --attach-timeout-ms 120000
+   node scripts/read-active-tab.js --check --wait-for-attach --attach-timeout-ms 120000
    ```
 
    If relay is reachable this command waits for an active attachment instead of immediate failure.
@@ -64,20 +64,20 @@ Expect `extensionConnected: true` and low queue depth before running fetches.
 4. Read default extraction from active tab:
 
    ```bash
-   node /Users/mathiasasberg/.codex/skills/private/grais-tab-webdata-reader/scripts/read-active-tab.js --pretty false
+   node scripts/read-active-tab.js --pretty false
    ```
 
 5. Read full DOM:
 
    ```bash
-   node /Users/mathiasasberg/.codex/skills/private/grais-tab-webdata-reader/scripts/read-active-tab.js \
+   node scripts/read-active-tab.js \
      --expression "document.documentElement.outerHTML" --pretty false
    ```
 
 6. Read WhatsApp messages (dry-run target):
 
    ```bash
-   node /Users/mathiasasberg/.codex/skills/private/grais-tab-webdata-reader/scripts/read-active-tab.js \
+   node scripts/read-active-tab.js \
      --preset whatsapp-messages \
      --selector "#main [data-testid=\"conversation-panel-messages\"], #main" \
      --max-messages 200 \
@@ -104,3 +104,7 @@ npm run relay:status
 - When the extension is ON (`ON` badge), it runs a reconnect loop: it keeps trying to re-establish relay socket and re-attach to the active tab automatically.
 - The relay now tracks extension heartbeats (`Grais.extensionHeartbeat`) and closes stale extension connections.
 - Request windows remain bounded by timeouts, so callers receive deterministic errors for retries instead of waiting indefinitely.
+
+## Skill source of truth
+- The repository root here is the source of truth for both this project and the installable skill.
+- Do not edit installed copies under global skill directories directly. Update this folder, commit & push, then refresh globals by reinstalling from GitHub.

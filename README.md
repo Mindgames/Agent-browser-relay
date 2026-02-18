@@ -57,7 +57,7 @@ This should return JSON with:
 2. Then run tool check for active tab attachment:
 
 ```bash
-node /Users/mathiasasberg/.codex/skills/private/grais-tab-webdata-reader/scripts/read-active-tab.js --check --wait-for-attach
+node scripts/read-active-tab.js --check --wait-for-attach
 ```
 
 ## Preflight check (recommended)
@@ -65,13 +65,13 @@ node /Users/mathiasasberg/.codex/skills/private/grais-tab-webdata-reader/scripts
 Before any fetch:
 
 ```bash
-node /Users/mathiasasberg/.codex/skills/private/grais-tab-webdata-reader/scripts/read-active-tab.js --check
+node scripts/read-active-tab.js --check
 ```
 
 For hands-off runs, you can wait until relay and extension attachment are both ready:
 
 ```bash
-node /Users/mathiasasberg/.codex/skills/private/grais-tab-webdata-reader/scripts/read-active-tab.js --check --wait-for-attach --attach-timeout-ms 120000
+node scripts/read-active-tab.js --check --wait-for-attach --attach-timeout-ms 120000
 ```
 
 Use this to verify both relay connectivity and active extension attachment.
@@ -81,13 +81,13 @@ Use this to verify both relay connectivity and active extension attachment.
 Default extractor:
 
 ```bash
-node /Users/mathiasasberg/.codex/skills/private/grais-tab-webdata-reader/scripts/read-active-tab.js --pretty false
+node scripts/read-active-tab.js --pretty false
 ```
 
 Full DOM:
 
 ```bash
-node /Users/mathiasasberg/.codex/skills/private/grais-tab-webdata-reader/scripts/read-active-tab.js \
+node scripts/read-active-tab.js \
   --expression "document.documentElement.outerHTML" \
   --pretty false
 ```
@@ -95,7 +95,7 @@ node /Users/mathiasasberg/.codex/skills/private/grais-tab-webdata-reader/scripts
 WhatsApp chat extraction:
 
 ```bash
-node /Users/mathiasasberg/.codex/skills/private/grais-tab-webdata-reader/scripts/read-active-tab.js \
+node scripts/read-active-tab.js \
   --preset whatsapp-messages \
   --selector "#main [data-testid=\"conversation-panel-messages\"], #main" \
   --max-messages 200 \
