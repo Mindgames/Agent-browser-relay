@@ -7,23 +7,35 @@ Use this project to let Grais read data from the **active Chrome tab** through a
 - Relay (`relay-server.js`): local bridge on `127.0.0.1:18792`.
 - Reader (`scripts/read-active-tab.js`): executes reads and prints JSON.
 
-## 1) One-time setup
-1. Load extension in Chrome:
-   - Open `chrome://extensions`
-   - Enable Developer mode
-   - Load unpacked from `/Users/mathiasasberg/Projects/grais/api+chrome/chrome-debugger/extension`
-   - Pin Grais Debugger icon
-2. Install dependencies:
+## 1) Clone and install (recommended path)
+Clone this repo under `~/codex`:
 
 ```bash
-cd /Users/mathiasasberg/Projects/grais/api+chrome/chrome-debugger
+mkdir -p ~/codex
+cd ~/codex
+git clone git@github.com:Replypilot/grais-debug-relay.git
+cd grais-debug-relay
 npm install
 ```
 
-## 2) Start a session (always this order)
+If you use HTTPS instead of SSH:
+
+```bash
+git clone https://github.com/Replypilot/grais-debug-relay.git
+```
+
+## 2) One-time Chrome setup
+1. Load extension in Chrome:
+   - Open `chrome://extensions`
+   - Enable Developer mode
+   - Load unpacked from `~/codex/grais-debug-relay/extension`
+   - Pin Grais Debugger icon
+
+## 3) Start a session (always this order)
 1. Start relay:
 
 ```bash
+cd ~/codex/grais-debug-relay
 npm run relay:start
 ```
 
@@ -41,7 +53,7 @@ node scripts/read-active-tab.js --check --wait-for-attach --attach-timeout-ms 12
 
 Continue only when this command succeeds.
 
-## 3) Read data
+## 4) Read data
 Default structured payload (`url`, `title`, `text`, `links`, `metaDescription`):
 
 ```bash
@@ -64,7 +76,7 @@ node scripts/read-active-tab.js \
   --pretty false
 ```
 
-## 4) Relay lifecycle
+## 5) Relay lifecycle
 Status:
 
 ```bash
@@ -82,7 +94,7 @@ Notes:
 - Override: `node scripts/relay-manager.js start --auto-stop-ms 10800000`
 - Disable auto-stop: `node scripts/relay-manager.js start --auto-stop-ms 0`
 
-## 5) Troubleshooting
+## 6) Troubleshooting
 - Relay unreachable:
 
 ```bash
