@@ -1,101 +1,48 @@
 # Grais Debugger Chrome Extension (Browser Relay)
 
-## Purpose
-Bridge Chrome to Grais so an agent can run safe extraction commands against the **active tab**.
+Use this project to let Grais read data from the **active Chrome tab** through a local relay.
 
-- Extension handles tab attach/detach and badge/status updates.
-- Local relay exposes the attached tab through a websocket bridge.
-- `grais-tab-webdata-reader` consumes the relay and returns extraction payloads as JSON.
+## What runs where
+- Extension (`background.js`): attaches/detaches the active tab.
+- Relay (`relay-server.js`): local bridge on `127.0.0.1:18792`.
+- Reader (`scripts/read-active-tab.js`): executes reads and prints JSON.
 
-## Capabilities
-- Attach and detach active tab from toolbar icon.
-- Recover attachment from active-tab events.
-- Evaluate DOM scripts in-page via `Runtime.evaluate`.
-- Default extraction:
-  - `url`, `title`, `text`, `links`, `metaDescription`.
-- Full DOM extraction using custom JS expression.
-- WhatsApp chat mode:
-  - `--preset whatsapp-messages` (alias: `whatsapp`, `wa`) with regex filtering for messages and senders.
-
-## Quick setup
-
-1. Install extension
-   - Chrome → `chrome://extensions`
+## 1) One-time setup
+1. Load extension in Chrome:
+   - Open `chrome://extensions`
    - Enable Developer mode
-   - Load unpacked folder: this repository
+   - Load unpacked from this repository
    - Pin Grais Debugger icon
-2. Start relay
-
-   ```bash
-   cd /Users/mathiasasberg/Projects/grais/api+chrome/chrome-debugger
-   npm install
-   npm run relay:start
-   ```
-
-3. Open target tab and click extension icon once to attach.
-
-   For agent-driven runs: after `relay:start`, the agent should pause, ask the human to attach the active tab, and wait for confirmation before proceeding.
-
-`relay:start` now keeps relay running in the background and auto-stops after 2 hours by default.
-If needed, override the auto-stop window or disable it:
-
-```bash
-node scripts/relay-manager.js start --auto-stop-ms 10800000   # 3 hours
-node scripts/relay-manager.js start --auto-stop-ms 0          # disable auto-stop
-```
-
-Check current auto-stop countdown and relay health with:
+2. Install dependencies:
 
 ```bash
 cd /Users/mathiasasberg/Projects/grais/api+chrome/chrome-debugger
-npm run relay:status
+npm install
 ```
 
-Manually stop at any time with:
+## 2) Start a session (always this order)
+1. Start relay:
 
 ```bash
-npm run relay:stop
+npm run relay:start
 ```
 
-## Readiness check (recommended before every DOM read)
+2. Human attach step (required for agent runs):
+   - Open/focus target tab in Chrome
+   - Click Grais Debugger icon
+   - Confirm badge shows `ON`
+   - Tell agent when done
 
-1. Verify relay + extension heartbeat bridge:
-
-```bash
-curl -s http://127.0.0.1:18792/status
-```
-
-This should return JSON with:
-- `extensionConnected: true`
-- `queuedControllerCommands: 0` (or low during normal operation)
-
-2. Then run tool check for active tab attachment:
-
-```bash
-node scripts/read-active-tab.js --check --wait-for-attach
-```
-
-Agents should only continue after this check succeeds.
-
-## Preflight check (recommended)
-
-Before any fetch:
-
-```bash
-node scripts/read-active-tab.js --check
-```
-
-For hands-off runs, you can wait until relay and extension attachment are both ready:
+3. Verify attach before any read:
 
 ```bash
 node scripts/read-active-tab.js --check --wait-for-attach --attach-timeout-ms 120000
 ```
 
-Use this to verify both relay connectivity and active extension attachment.
+Continue only when this command succeeds.
 
-## Example reads
-
-Default extractor:
+## 3) Read data
+Default structured payload (`url`, `title`, `text`, `links`, `metaDescription`):
 
 ```bash
 node scripts/read-active-tab.js --pretty false
@@ -104,45 +51,60 @@ node scripts/read-active-tab.js --pretty false
 Full DOM:
 
 ```bash
-node scripts/read-active-tab.js \
-  --expression "document.documentElement.outerHTML" \
-  --pretty false
+node scripts/read-active-tab.js --expression "document.documentElement.outerHTML" --pretty false
 ```
 
-WhatsApp chat extraction:
+WhatsApp messages:
 
 ```bash
 node scripts/read-active-tab.js \
   --preset whatsapp-messages \
   --selector "#main [data-testid=\"conversation-panel-messages\"], #main" \
   --max-messages 200 \
-  --sender-regex "Mathias|Judy" \
   --pretty false
 ```
 
-- `--wait-for-attach` wait until relay+extension attachment is ready before running checks/fetches.
-- `--attach-timeout-ms <ms>` maximum wait time (default: `120000`).
-- `--attach-poll-ms <ms>` polling interval (default: `500`).
-
-## Troubleshooting
-- Red `!` badge: relay unreachable / not attached.
-- Re-run `--check` after switching tabs.
-- If needed, re-click the toolbar icon to trigger re-attach.
-- If you see multiple relay processes, audit with:
+## 4) Relay lifecycle
+Status:
 
 ```bash
 npm run relay:status
 ```
 
-- To force a clean restart, run:
+Stop:
+
+```bash
+npm run relay:stop
+```
+
+Notes:
+- `relay:start` auto-stops after 2 hours by default.
+- Override: `node scripts/relay-manager.js start --auto-stop-ms 10800000`
+- Disable auto-stop: `node scripts/relay-manager.js start --auto-stop-ms 0`
+
+## 5) Troubleshooting
+- Relay unreachable:
+
+```bash
+npm run relay:status
+```
+
+- Extension not attached (`extensionConnected: false`):
+  - Re-focus target tab
+  - Click extension icon again
+  - Re-run check command
+
+- `Timed out waiting for Runtime.evaluate`:
+  - Tab is usually not attached/active
+  - Re-attach and re-run:
+
+```bash
+node scripts/read-active-tab.js --check --wait-for-attach --attach-timeout-ms 120000
+```
+
+- Clean restart:
 
 ```bash
 npm run relay:stop
 npm run relay:start
 ```
-
-Reliability:
-- The relay now keeps controller requests while the extension is reconnecting, then flushes them once the extension reattaches.
-- When the extension is ON (`ON` badge), it keeps trying to reconnect to relay automatically and re-attaches the active tab when relay comes back.
-- The extension sends heartbeat messages every few seconds; stale extension sessions are dropped and re-established automatically by user actions or next command flow.
-- If a request waits for an unattached relay too long, it now fails with timeout instead of hanging indefinitely.
