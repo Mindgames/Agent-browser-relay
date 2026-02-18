@@ -34,11 +34,26 @@ Bridge Chrome to Grais so an agent can run safe extraction commands against the 
 
 3. Open target tab and click extension icon once to attach.
 
-Keep relay running in the background for the whole workflow session and stop it only when done:
+   For agent-driven runs: after `relay:start`, the agent should pause, ask the human to attach the active tab, and wait for confirmation before proceeding.
+
+`relay:start` now keeps relay running in the background and auto-stops after 2 hours by default.
+If needed, override the auto-stop window or disable it:
+
+```bash
+node scripts/relay-manager.js start --auto-stop-ms 10800000   # 3 hours
+node scripts/relay-manager.js start --auto-stop-ms 0          # disable auto-stop
+```
+
+Check current auto-stop countdown and relay health with:
 
 ```bash
 cd /Users/mathiasasberg/Projects/grais/api+chrome/chrome-debugger
 npm run relay:status
+```
+
+Manually stop at any time with:
+
+```bash
 npm run relay:stop
 ```
 
@@ -59,6 +74,8 @@ This should return JSON with:
 ```bash
 node scripts/read-active-tab.js --check --wait-for-attach
 ```
+
+Agents should only continue after this check succeeds.
 
 ## Preflight check (recommended)
 

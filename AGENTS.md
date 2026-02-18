@@ -32,12 +32,44 @@ This repository provides a local browser-relay so Grais can attach to the **acti
    npm run relay:start
    ```
 
-3. Keep relay running continuously while using the extension and only stop when finished:
+3. `relay:start` keeps relay running and auto-stops after 2 hours by default (to avoid start/stop churn).
+   Override when needed:
+
+   ```bash
+   node scripts/relay-manager.js start --auto-stop-ms 10800000
+   node scripts/relay-manager.js start --auto-stop-ms 0
+   ```
+
+4. Keep relay running continuously while using the extension and only stop when finished:
 
    ```bash
    npm run relay:status
    npm run relay:stop
    ```
+
+5. Human attach gate (required for agent workflows):
+   - After relay is started, the agent must pause and ask the human to attach the active tab:
+     - Open/focus the target tab in Chrome.
+     - Click the Grais Debugger toolbar icon so badge shows `ON`.
+   - The agent must wait for human confirmation before continuing.
+   - Before any read, the agent must run:
+
+   ```bash
+   node scripts/read-active-tab.js --check --wait-for-attach --attach-timeout-ms 120000
+   ```
+
+   Continue only when this check succeeds.
+
+## Agent execution contract (mandatory)
+- Use these exact scripts and command names. Do not search for alternatives and do not say they "may be named differently":
+  - `npm run relay:start`
+  - `npm run relay:status`
+  - `npm run relay:stop`
+  - `node scripts/read-active-tab.js`
+- After `relay:start`, agent must stop and ask the human to attach the active tab, then wait for confirmation.
+- Agent must run `node scripts/read-active-tab.js --check --wait-for-attach --attach-timeout-ms 120000` before any data read and continue only on success.
+- Agent must not stop/restart relay during a task unless the human explicitly asks for restart or a hard failure requires it.
+- If canonical scripts are missing, fail fast with a concrete error and stop; do not pivot to a different pipeline.
 
 Before running reads, also verify relay health:
 

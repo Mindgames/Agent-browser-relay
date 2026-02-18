@@ -16,6 +16,13 @@ Use this skill to attach to the active Chrome tab through the bundled Grais Debu
    npm run relay:start
    ```
 
+   `relay:start` auto-stops after 2 hours by default. Override if needed:
+
+   ```bash
+   node scripts/relay-manager.js start --auto-stop-ms 10800000
+   node scripts/relay-manager.js start --auto-stop-ms 0
+   ```
+
 2. Load extension from this folder in Chrome
 
    - `chrome://extensions`
@@ -24,11 +31,26 @@ Use this skill to attach to the active Chrome tab through the bundled Grais Debu
 
 3. Attach the extension to the target tab (click toolbar icon)
 
+   Agent requirement: after `relay:start`, pause and ask the human to do this attach step, then wait for confirmation before continuing.
+
 4. Check readiness and attach state
 
    ```bash
    node scripts/read-active-tab.js --check --wait-for-attach --attach-timeout-ms 120000
    ```
+
+   Continue only if this command returns success.
+
+## Mandatory behavior for agents
+- Use fixed commands from this repo. Do not try to "discover" alternate script names.
+- Canonical commands:
+  - `npm run relay:start`
+  - `npm run relay:status`
+  - `npm run relay:stop`
+  - `node scripts/read-active-tab.js`
+- After `relay:start`, pause and ask the human to attach the target tab before any read.
+- Run `node scripts/read-active-tab.js --check --wait-for-attach --attach-timeout-ms 120000` before reads and proceed only when it succeeds.
+- Do not stop/restart relay during the task unless the human requests it or recovery is explicitly required.
 
 5. Read structured tab payload
 

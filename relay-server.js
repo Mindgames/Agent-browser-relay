@@ -10,6 +10,7 @@ const { WebSocketServer } = require('ws')
 const DEFAULT_PORT = 18792
 const DEFAULT_HOST = '127.0.0.1'
 const DEFAULT_TIMEOUT_MS = 12000
+const DEFAULT_MAX_RUNTIME_MS = 0
 const QUEUED_REQUEST_TIMEOUT_MS = 12000
 const RELAY_HEARTBEAT_TIMEOUT_MS = 15000
 const RELAY_HEARTBEAT_INTERVAL_MS = 2500
@@ -18,20 +19,25 @@ const MAX_QUEUED_CONTROLLER_COMMANDS = 16
 const args = parseArgs(process.argv.slice(2))
 if (args.help) {
   console.log(`Usage:
-  node relay-server.js [--host 127.0.0.1] [--port 18792]
+  node relay-server.js [--host 127.0.0.1] [--port 18792] [--timeout 12000] [--max-runtime-ms 0]
 
 Options:
-  --host   Bind address (default: ${DEFAULT_HOST})
-  --port   Listen port (default: ${DEFAULT_PORT})
+  --host            Bind address (default: ${DEFAULT_HOST})
+  --port            Listen port (default: ${DEFAULT_PORT})
+  --timeout         Controller request timeout (default: ${DEFAULT_TIMEOUT_MS})
+  --max-runtime-ms  Auto-stop relay after N ms (default: disabled)
 `)
   process.exit(0)
 }
 
 const host = args.host || DEFAULT_HOST
 const port = clampPort(args.port, DEFAULT_PORT)
-const requestTimeoutMs = clampPort(args.timeout, DEFAULT_TIMEOUT_MS)
+const requestTimeoutMs = parsePositiveInt(args.timeout, DEFAULT_TIMEOUT_MS, 'timeout')
+const maxRuntimeMs = parseNonNegativeInt(args.maxRuntimeMs, DEFAULT_MAX_RUNTIME_MS, 'max-runtime-ms')
 const relayLockPath = getRelayLockPath(host, port)
 const relayLockFd = acquireRelayLock(relayLockPath)
+let autoShutdownTimer = null
+let shuttingDown = false
 
 /** @type {import('node:net').Socket | null} */
 let extensionSocket = null
@@ -566,6 +572,38 @@ function stopRelayHeartbeatWatchdog() {
   relayHeartbeatWatchdog = null
 }
 
+function stopAutoShutdownTimer() {
+  if (!autoShutdownTimer) return
+  clearTimeout(autoShutdownTimer)
+  autoShutdownTimer = null
+}
+
+function shutdown(exitCode = 0) {
+  if (shuttingDown) return
+  shuttingDown = true
+  stopAutoShutdownTimer()
+  releaseRelayLock()
+  stopRelayHeartbeatWatchdog()
+  wss.clients.forEach((socket) => socket.close())
+  httpServer.close(() => process.exit(exitCode))
+}
+
+function parsePositiveInt(value, fallback, label) {
+  const parsed = Number.parseInt(String(value || fallback), 10)
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error(`Invalid ${label}: ${String(value)} (must be positive integer)`)
+  }
+  return parsed
+}
+
+function parseNonNegativeInt(value, fallback, label) {
+  const parsed = Number.parseInt(String(value || fallback), 10)
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error(`Invalid ${label}: ${String(value)} (must be non-negative integer)`)
+  }
+  return parsed
+}
+
 function clampPort(value, fallback) {
   const parsed = Number.parseInt(String(value || ''), 10)
   if (!Number.isFinite(parsed) || parsed < 1 || parsed > 65535) return fallback
@@ -583,6 +621,8 @@ function parseArgs(argv) {
       out.host = argv[++i]
     } else if (arg === '--timeout' && argv[i + 1]) {
       out.timeout = argv[++i]
+    } else if (arg === '--max-runtime-ms' && argv[i + 1]) {
+      out.maxRuntimeMs = argv[++i]
     }
   }
   return out
@@ -591,20 +631,20 @@ function parseArgs(argv) {
 httpServer.listen(port, host, () => {
   console.log(`Grais Debugger relay listening on ws://${host}:${port}/extension`)
   console.log(`Health endpoint: http://${host}:${port}/`)
+  if (maxRuntimeMs > 0) {
+    autoShutdownTimer = setTimeout(() => {
+      console.log(`Auto-stopping relay after max runtime (${maxRuntimeMs}ms)`)
+      shutdown(0)
+    }, maxRuntimeMs)
+  }
 })
 
 process.on('SIGINT', () => {
-  releaseRelayLock()
-  stopRelayHeartbeatWatchdog()
-  wss.clients.forEach((socket) => socket.close())
-  httpServer.close(() => process.exit(0))
+  shutdown(0)
 })
 
 process.on('SIGTERM', () => {
-  releaseRelayLock()
-  stopRelayHeartbeatWatchdog()
-  wss.clients.forEach((socket) => socket.close())
-  httpServer.close(() => process.exit(0))
+  shutdown(0)
 })
 
 process.on('exit', () => {

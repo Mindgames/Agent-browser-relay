@@ -10,6 +10,7 @@ const DEFAULT_PORT = 18792
 const DEFAULT_TIMEOUT_MS = 12000
 const DEFAULT_START_TIMEOUT_MS = 10000
 const DEFAULT_START_POLL_MS = 250
+const DEFAULT_AUTO_STOP_MS = 2 * 60 * 60 * 1000
 const REPO_ROOT = path.resolve(__dirname, '..')
 const RELAY_FILE_PREFIX = 'grais-debugger-relay'
 
@@ -29,6 +30,7 @@ const host = args.host || DEFAULT_HOST
 const port = parsePort(args.port, DEFAULT_PORT)
 const timeoutMs = parsePositiveInt(args.timeout, DEFAULT_TIMEOUT_MS, '--timeout')
 const startTimeoutMs = parsePositiveInt(args.startTimeoutMs, DEFAULT_START_TIMEOUT_MS, '--start-timeout-ms')
+const autoStopMs = parseNonNegativeInt(args.autoStopMs, DEFAULT_AUTO_STOP_MS, '--auto-stop-ms')
 
 const relayServerPath = path.join(REPO_ROOT, 'relay-server.js')
 const relayStatePath = getRelayStatePath(host, port)
@@ -59,7 +61,12 @@ async function main() {
 async function startRelay() {
   const preCheck = await fetchRelayStatus(false)
   if (preCheck.ok) {
-    console.log(`Relay already reachable at http://${host}:${port}/status`)
+    const state = readRelayState()
+    const now = Date.now()
+    const autoStopInMs =
+      Number.isInteger(state?.autoStopAt) && state.autoStopAt > now ? state.autoStopAt - now : null
+    const ttlLabel = autoStopInMs !== null ? ` (auto-stop in ${Math.ceil(autoStopInMs / 1000)}s)` : ''
+    console.log(`Relay already reachable at http://${host}:${port}/status${ttlLabel}`)
     return
   }
 
@@ -79,11 +86,15 @@ async function startRelay() {
     host,
     port,
     startedAt: Date.now(),
+    autoStopMs,
+    autoStopAt: autoStopMs > 0 ? Date.now() + autoStopMs : null,
   }
   fs.writeFileSync(relayStatePath, JSON.stringify(state, null, 2))
 
   const pidLabel = state.pid ? ` (server pid: ${state.pid})` : ''
-  console.log(`Relay started in background at http://${host}:${port}/status${pidLabel}`)
+  const ttlLabel =
+    autoStopMs > 0 ? ` (auto-stop in ${Math.ceil(autoStopMs / 1000)}s)` : ' (auto-stop disabled)'
+  console.log(`Relay started in background at http://${host}:${port}/status${pidLabel}${ttlLabel}`)
 }
 
 async function stopRelay() {
@@ -112,7 +123,7 @@ async function stopRelay() {
     await stopProcess(pid, 2000)
   }
 
-  await waitFor(() => !fetchRelayStatus(false).then((s) => s.ok), 2000, 100)
+  await waitFor(() => fetchRelayStatus(false).then((s) => s.ok === false), 2000, 100)
   cleanupManagerState()
   console.log(`Relay stop requested for pid(s): ${uniquePids.join(', ')}`)
 }
@@ -136,6 +147,10 @@ async function printStatus() {
     queuedControllerCommands: status.queuedControllerCommands,
     lockPid: lockOwner?.pid ?? null,
     managerPid: state?.pid ?? null,
+    autoStopMs: Number.isInteger(state?.autoStopMs) ? state.autoStopMs : null,
+    autoStopAt: Number.isInteger(state?.autoStopAt) ? state.autoStopAt : null,
+    autoStopInMs:
+      Number.isInteger(state?.autoStopAt) && state.autoStopAt > Date.now() ? state.autoStopAt - Date.now() : null,
   }
   console.log(JSON.stringify(payload, null, 2))
 }
@@ -143,9 +158,13 @@ async function printStatus() {
 function launchRelayProcess() {
   const logPath = getRelayLogPath(host, port)
   const logHandle = fs.openSync(logPath, 'a')
+  const relayArgs = [relayServerPath, '--host', host, '--port', String(port), '--timeout', String(timeoutMs)]
+  if (autoStopMs > 0) {
+    relayArgs.push('--max-runtime-ms', String(autoStopMs))
+  }
   const child = spawn(
     process.execPath,
-    [relayServerPath, '--host', host, '--port', String(port), '--timeout', String(timeoutMs)],
+    relayArgs,
     {
       cwd: REPO_ROOT,
       detached: true,
@@ -335,6 +354,14 @@ function parsePositiveInt(value, fallback, label) {
   return parsed
 }
 
+function parseNonNegativeInt(value, fallback, label) {
+  const parsed = Number.parseInt(String(value || fallback), 10)
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error(`Invalid ${label}: ${String(value)} (must be non-negative integer)`)
+  }
+  return parsed
+}
+
 function parsePort(value, fallback) {
   const parsed = Number.parseInt(String(value || fallback), 10)
   if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65535) {
@@ -359,6 +386,7 @@ function parseArgs(argv) {
     else if (arg === '--port' && argv[i + 1]) out.port = argv[++i]
     else if (arg === '--timeout' && argv[i + 1]) out.timeout = argv[++i]
     else if (arg === '--start-timeout-ms' && argv[i + 1]) out.startTimeoutMs = argv[++i]
+    else if (arg === '--auto-stop-ms' && argv[i + 1]) out.autoStopMs = argv[++i]
   }
 
   return out
@@ -366,7 +394,7 @@ function parseArgs(argv) {
 
 function printUsage() {
   console.log(`Usage:
-  node scripts/relay-manager.js start [--host 127.0.0.1] [--port 18792] [--timeout 12000] [--start-timeout-ms 10000]
+  node scripts/relay-manager.js start [--host 127.0.0.1] [--port 18792] [--timeout 12000] [--start-timeout-ms 10000] [--auto-stop-ms 7200000]
   node scripts/relay-manager.js status [--host 127.0.0.1] [--port 18792]
   node scripts/relay-manager.js stop [--host 127.0.0.1] [--port 18792]
 `)
