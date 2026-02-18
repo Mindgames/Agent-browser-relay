@@ -1,0 +1,18 @@
+{
+  "name": "grais-debugger-relay",
+  "private": true,
+  "version": "0.1.0",
+  "bin": {
+    "grais-debugger-relay": "relay-server.js"
+  },
+  "scripts": {
+    "start": "node relay-server.js",
+    "start:relay": "node relay-server.js",
+    "relay:start": "node scripts/relay-manager.js start",
+    "relay:status": "node scripts/relay-manager.js status",
+    "relay:stop": "node scripts/relay-manager.js stop"
+  },
+  "dependencies": {
+    "ws": "^8.18.2"
+  }
+}

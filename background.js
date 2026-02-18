@@ -1,0 +1,975 @@
+const DEFAULT_PORT = 18792
+const RECOVERABLE_SEND_RETRIES = 2
+const RECOVER_RETRY_DELAY_MS = 600
+const TAB_RECOVER_AUTO_REATTACH_DELAY_MS = 250
+const ATTACH_COMMAND_TIMEOUT_MS = 8000
+const DEBUGGER_COMMAND_TIMEOUT_MS = 3000
+const RELAY_HEARTBEAT_MS = 2500
+const RELAY_RECONNECT_BASE_DELAY_MS = 500
+const RELAY_RECONNECT_MAX_DELAY_MS = 10000
+const FORWARD_COMMAND_TIMEOUT_MS = 10000
+const DEBUG_LOG = true
+
+const BADGE = {
+  on: { text: 'ON', color: '#FF5A36' },
+  off: { text: '', color: '#000000' },
+  connecting: { text: '…', color: '#F59E0B' },
+  error: { text: '!', color: '#B91C1C' },
+}
+
+/** @type {WebSocket|null} */
+let relayWs = null
+/** @type {Promise<void>|null} */
+let relayConnectPromise = null
+/** @type {Promise<void>|null} */
+let autoAttachPromise = null
+/** @type {number|null} */
+let relayReconnectTimer = null
+/** @type {number} */
+let relayReconnectAttempts = 0
+/** @type {number|null} */
+let activeTabAutoReattachTimer = null
+/** @type {number|null} */
+let activeTabAutoReattachEventTimer = null
+/** @type {number|null} */
+let relayHeartbeatTimer = null
+
+const manualDetachTabs = new Set()
+
+let debuggerListenersInstalled = false
+/** @type {boolean} */
+let userAttachmentEnabled = false
+/** @type {number|null} */
+let userPinnedTabId = null
+
+let nextSession = 1
+
+/** @type {Map<number, {state:'connecting'|'connected', sessionId?:string, targetId?:string, attachOrder?:number}>} */
+const tabs = new Map()
+/** @type {Map<string, number>} */
+const tabBySession = new Map()
+/** @type {Map<string, number>} */
+const childSessionToTab = new Map()
+
+/** @type {Map<number, {resolve:(v:any)=>void, reject:(e:Error)=>void}>} */
+const pending = new Map()
+
+function nowStack() {
+  try {
+    return new Error().stack || ''
+  } catch {
+    return ''
+  }
+}
+
+async function getRelayPort() {
+  const stored = await chrome.storage.local.get(['relayPort'])
+  const raw = stored.relayPort
+  const n = Number.parseInt(String(raw || ''), 10)
+  if (!Number.isFinite(n) || n <= 0 || n > 65535) return DEFAULT_PORT
+  return n
+}
+
+async function getUserAttachmentPref() {
+  const stored = await chrome.storage.local.get(['userAttachmentEnabled'])
+  return stored.userAttachmentEnabled === true
+}
+
+async function setUserAttachmentPref(enabled) {
+  await chrome.storage.local.set({ userAttachmentEnabled: Boolean(enabled) })
+}
+
+function setBadge(tabId, kind) {
+  const cfg = BADGE[kind]
+  void chrome.action.setBadgeText({ tabId, text: cfg.text })
+  void chrome.action.setBadgeBackgroundColor({ tabId, color: cfg.color })
+  void chrome.action.setBadgeTextColor({ tabId, color: '#FFFFFF' }).catch(() => {})
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms)
+  })
+}
+
+function dbg(...args) {
+  if (!DEBUG_LOG) return
+  try {
+    console.log('[Grais Debugger]', ...args)
+  } catch {
+    // no-op
+  }
+}
+
+function withTimeout(work, label, timeoutMs) {
+  return Promise.race([
+    work,
+    new Promise((_, reject) => {
+      setTimeout(() => {
+        reject(new Error(`${label} timed out after ${timeoutMs}ms`))
+      }, timeoutMs)
+    }),
+  ])
+}
+
+function isRecoverableDebuggerError(error) {
+  const message = String(error instanceof Error ? error.message : error || '').toLowerCase()
+  if (!message) return false
+  return (
+    message.includes('no tab with id') ||
+    message.includes('no target with id') ||
+    message.includes('target closed') ||
+    message.includes('context was destroyed') ||
+    message.includes('execution context') ||
+    message.includes('detached') ||
+    message.includes('cannot find context') ||
+    message.includes('chrome remote debugging session') ||
+    message.includes('inspector detached')
+  )
+}
+
+async function getActiveTabId() {
+  const [active] = await chrome.tabs.query({ active: true, currentWindow: true })
+  if (typeof active?.id === 'number') return active.id
+
+  const [fallback] = await chrome.tabs.query({ active: true })
+  return typeof fallback?.id === 'number' ? fallback.id : null
+}
+
+async function getPinnedOrActiveTabId() {
+  if (Number.isInteger(userPinnedTabId)) {
+    const pinnedTab = await chrome.tabs.get(userPinnedTabId).catch(() => null)
+    if (pinnedTab?.id) return pinnedTab.id
+    userPinnedTabId = null
+  }
+  return getActiveTabId()
+}
+
+function normalizeTabId(value) {
+  if (typeof value === 'number' && Number.isInteger(value)) return value
+  if (typeof value === 'string') {
+    const parsed = Number.parseInt(value.trim(), 10)
+    if (Number.isInteger(parsed)) return parsed
+  }
+  return null
+}
+
+async function detachNonActiveTabs(keepTabId) {
+  const toDetach = [...tabs.keys()].filter((tabId) => tabId !== keepTabId)
+  for (const tabId of toDetach) {
+    await detachTab(tabId, 'switched')
+  }
+}
+
+function scheduleActiveTabReattachFromEvent() {
+  if (userPinnedTabId !== null) return
+  if (!userAttachmentEnabled) return
+  if (activeTabAutoReattachEventTimer) {
+    clearTimeout(activeTabAutoReattachEventTimer)
+  }
+
+  activeTabAutoReattachEventTimer = setTimeout(() => {
+    activeTabAutoReattachEventTimer = null
+    void ensureActiveTabAndRelayConnection({ force: false }).catch(() => {})
+  }, 120)
+}
+
+async function ensureActiveTabAndRelayConnection({ force = false } = {}) {
+  dbg('ensureActiveTabAndRelayConnection', { force })
+  if (!userAttachmentEnabled) return
+  try {
+    await ensureRelayConnection()
+  } catch {
+    return
+  }
+
+  const activeTabId = await getActiveTabId()
+  if (!force && activeTabId && manualDetachTabs.has(activeTabId)) return
+
+  try {
+    await ensureActiveTabAttachedFromRelay({ force })
+  } catch {
+    // best effort while relay is transiently unavailable
+  }
+}
+
+function resolveTabIdByCommand(sessionId, targetId) {
+  const bySession = sessionId ? getTabBySessionId(sessionId) : null
+  return (
+    bySession?.tabId ||
+    (targetId ? getTabByTargetId(targetId) : null) ||
+    (() => {
+      for (const [id, tab] of tabs.entries()) {
+        if (tab.state === 'connected') return id
+      }
+      return null
+    })()
+  )
+}
+
+function clearTabMappings(tabId) {
+  const tab = tabs.get(tabId)
+  if (tab?.sessionId) {
+    tabBySession.delete(tab.sessionId)
+  }
+  tabs.delete(tabId)
+  for (const [childSessionId, parentTabId] of childSessionToTab.entries()) {
+    if (parentTabId === tabId) childSessionToTab.delete(childSessionId)
+  }
+  return tab
+}
+
+async function recoverTabStateFromDetach(tabId) {
+  if (!tabId) return
+  clearTabMappings(tabId)
+  await chrome.debugger.detach({ tabId }).catch(() => {})
+  await sleep(TAB_RECOVER_AUTO_REATTACH_DELAY_MS)
+  try {
+    await ensureActiveTabAttachedFromRelay({ force: true })
+  } catch {
+    // best effort
+  }
+}
+
+async function ensureRelayConnection() {
+  dbg('ensureRelayConnection.start')
+  if (relayWs && relayWs.readyState === WebSocket.OPEN) return
+  if (relayConnectPromise) return await relayConnectPromise
+
+  relayConnectPromise = (async () => {
+    const port = await getRelayPort()
+    const httpBase = `http://127.0.0.1:${port}`
+    const wsUrl = `ws://127.0.0.1:${port}/extension`
+
+    // Fast preflight: is the relay server up?
+    try {
+      await fetch(`${httpBase}/`, { method: 'HEAD', signal: AbortSignal.timeout(2000) })
+    } catch (err) {
+      throw new Error(`Relay server not reachable at ${httpBase} (${String(err)})`)
+    }
+
+    dbg('ensureRelayConnection.connecting', { port })
+    const ws = new WebSocket(wsUrl)
+    relayWs = ws
+
+    await new Promise((resolve, reject) => {
+      const t = setTimeout(() => reject(new Error('WebSocket connect timeout')), 5000)
+      ws.onopen = () => {
+        clearTimeout(t)
+        resolve()
+      }
+      ws.onerror = () => {
+        clearTimeout(t)
+        reject(new Error('WebSocket connect failed'))
+      }
+      ws.onclose = (ev) => {
+        clearTimeout(t)
+        reject(new Error(`WebSocket closed (${ev.code} ${ev.reason || 'no reason'})`))
+      }
+    })
+
+    ws.onmessage = (event) => void onRelayMessage(String(event.data || ''))
+    ws.onclose = () => onRelayClosed('closed')
+    ws.onerror = () => onRelayClosed('error')
+    startRelayHeartbeat()
+
+    if (!debuggerListenersInstalled) {
+      debuggerListenersInstalled = true
+      chrome.debugger.onEvent.addListener(onDebuggerEvent)
+      chrome.debugger.onDetach.addListener(onDebuggerDetach)
+    }
+  })()
+
+  try {
+    await relayConnectPromise
+  } finally {
+    relayConnectPromise = null
+  }
+}
+
+function onRelayClosed(reason) {
+  dbg('relayClosed', reason)
+  stopRelayHeartbeat()
+  stopRelayReconnectLoop()
+  relayWs = null
+  for (const [id, p] of pending.entries()) {
+    pending.delete(id)
+    p.reject(new Error(`Relay disconnected (${reason})`))
+  }
+
+  for (const tabId of tabs.keys()) {
+    void chrome.debugger.detach({ tabId }).catch(() => {})
+    setBadge(tabId, 'connecting')
+    void chrome.action.setTitle({
+      tabId,
+      title: 'Grais Debugger Browser Relay: disconnected (click to re-attach)',
+    })
+  }
+  tabs.clear()
+  tabBySession.clear()
+  childSessionToTab.clear()
+  relayReconnectAttempts = 0
+
+  if (userAttachmentEnabled) {
+    startRelayReconnectLoop()
+  }
+}
+
+function startRelayHeartbeat() {
+  stopRelayHeartbeat()
+  if (!relayWs || relayWs.readyState !== WebSocket.OPEN) return
+
+  relayHeartbeatTimer = setInterval(() => {
+    try {
+      sendToRelay({
+        method: 'Grais.extensionHeartbeat',
+        ts: Date.now(),
+      })
+    } catch {
+      // Ignore; relay connection will be restarted by reconnection flow.
+    }
+  }, RELAY_HEARTBEAT_MS)
+}
+
+function stopRelayHeartbeat() {
+  if (!relayHeartbeatTimer) return
+  clearInterval(relayHeartbeatTimer)
+  relayHeartbeatTimer = null
+}
+
+function startRelayReconnectLoop() {
+  dbg('startRelayReconnectLoop', { enabled: userAttachmentEnabled, attempts: relayReconnectAttempts })
+  if (!userAttachmentEnabled) return
+  if (relayReconnectTimer) return
+
+  const delay = Math.min(
+    RELAY_RECONNECT_MAX_DELAY_MS,
+    RELAY_RECONNECT_BASE_DELAY_MS * (2 ** Math.min(relayReconnectAttempts, 6)),
+  )
+  relayReconnectTimer = setTimeout(() => {
+    relayReconnectTimer = null
+    if (!userAttachmentEnabled) return
+
+    void (async () => {
+      if (relayWs && relayWs.readyState === WebSocket.OPEN) {
+        relayReconnectAttempts = 0
+        return
+      }
+
+      try {
+        await ensureRelayConnection()
+        await ensureActiveTabAttachedFromRelay({ force: true })
+        relayReconnectAttempts = 0
+        stopRelayReconnectLoop()
+      } catch {
+        relayReconnectAttempts += 1
+        startRelayReconnectLoop()
+      }
+    })()
+  }, delay)
+}
+
+function stopRelayReconnectLoop() {
+  if (!relayReconnectTimer) return
+  clearTimeout(relayReconnectTimer)
+  relayReconnectTimer = null
+}
+
+function scheduleAutoAttachFromDetach(reason, tabId) {
+  dbg('scheduleAutoAttachFromDetach', { reason, tabId })
+  if (!userAttachmentEnabled) return
+  if (reason === 'toggle' || reason === 'recovery') return
+  if (!tabId || manualDetachTabs.has(tabId)) return
+  if (activeTabAutoReattachTimer) {
+    clearTimeout(activeTabAutoReattachTimer)
+  }
+  activeTabAutoReattachTimer = setTimeout(() => {
+    void ensureActiveTabAttachedFromRelay({ force: true }).catch(() => {})
+  }, 250)
+}
+
+function sendToRelay(payload) {
+  dbg('sendToRelay', { method: payload?.method, id: payload?.id })
+  const ws = relayWs
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    throw new Error('Relay not connected')
+  }
+  ws.send(JSON.stringify(payload))
+}
+
+async function maybeOpenHelpOnce() {
+  try {
+    const stored = await chrome.storage.local.get(['helpOnErrorShown'])
+    if (stored.helpOnErrorShown === true) return
+    await chrome.storage.local.set({ helpOnErrorShown: true })
+    await chrome.runtime.openOptionsPage()
+  } catch {
+    // ignore
+  }
+}
+
+function requestFromRelay(command) {
+  dbg('requestFromRelay', { id: command?.id, method: command?.method })
+  const id = command.id
+  return new Promise((resolve, reject) => {
+    pending.set(id, { resolve, reject })
+    try {
+      sendToRelay(command)
+    } catch (err) {
+      pending.delete(id)
+      reject(err instanceof Error ? err : new Error(String(err)))
+    }
+  })
+}
+
+async function onRelayMessage(text) {
+  /** @type {any} */
+  let msg
+  try {
+    msg = JSON.parse(text)
+  } catch {
+    return
+  }
+
+  if (msg && msg.method === 'ping') {
+    dbg('relayMessage.ping')
+    try {
+      sendToRelay({ method: 'pong' })
+    } catch {
+      // ignore
+    }
+    return
+  }
+
+  if (msg && typeof msg.id === 'number' && (msg.result !== undefined || msg.error !== undefined)) {
+    dbg('relayMessage.result', { id: msg.id, hasError: Boolean(msg.error) })
+    const p = pending.get(msg.id)
+    if (!p) return
+    pending.delete(msg.id)
+    if (msg.error) p.reject(new Error(String(msg.error)))
+    else p.resolve(msg.result)
+    return
+  }
+
+  if (msg && typeof msg.id === 'number' && msg.method === 'forwardCDPCommand') {
+    dbg('relayMessage.forwardCDPCommand', { id: msg.id, method: msg?.params?.method, sessionId: msg?.params?.sessionId })
+    try {
+      const result = await withTimeout(handleForwardCdpCommand(msg), 'forwardCDPCommand', FORWARD_COMMAND_TIMEOUT_MS)
+      try {
+        sendToRelay({ id: msg.id, result })
+      } catch {
+        // If relay is unavailable, command will timeout in caller.
+      }
+    } catch (err) {
+      try {
+        sendToRelay({ id: msg.id, error: err instanceof Error ? err.message : String(err) })
+      } catch {
+        // If relay is unavailable, command will timeout in caller.
+      }
+    }
+  }
+}
+
+function getTabBySessionId(sessionId) {
+  const direct = tabBySession.get(sessionId)
+  if (direct) return { tabId: direct, kind: 'main' }
+  const child = childSessionToTab.get(sessionId)
+  if (child) return { tabId: child, kind: 'child' }
+  return null
+}
+
+function getTabByTargetId(targetId) {
+  for (const [tabId, tab] of tabs.entries()) {
+    if (tab.targetId === targetId) return tabId
+  }
+  return null
+}
+
+async function attachTab(tabId, opts = {}) {
+  dbg('attachTab.start', { tabId, skipAttachedEvent: Boolean(opts.skipAttachedEvent) })
+  const debuggee = { tabId }
+  await withTimeout(
+    chrome.debugger.attach(debuggee, '1.3'),
+    `attach(${tabId})`,
+    ATTACH_COMMAND_TIMEOUT_MS,
+  )
+  await withTimeout(
+    chrome.debugger.sendCommand(debuggee, 'Page.enable').catch(() => {}),
+    `Page.enable(${tabId})`,
+    DEBUGGER_COMMAND_TIMEOUT_MS,
+  ).catch(() => {})
+
+  const info = /** @type {any} */ (
+    await withTimeout(
+      chrome.debugger.sendCommand(debuggee, 'Target.getTargetInfo'),
+      `Target.getTargetInfo(${tabId})`,
+      DEBUGGER_COMMAND_TIMEOUT_MS,
+    )
+  )
+  const targetInfo = info?.targetInfo
+  const targetId = String(targetInfo?.targetId || '').trim()
+  if (!targetId) {
+    throw new Error('Target.getTargetInfo returned no targetId')
+  }
+
+  const sessionId = `cb-tab-${nextSession++}`
+  const attachOrder = nextSession
+
+  tabs.set(tabId, { state: 'connected', sessionId, targetId, attachOrder })
+  tabBySession.set(sessionId, tabId)
+    void chrome.action.setTitle({
+      tabId,
+      title: 'Grais Debugger Browser Relay: attached (click to detach)',
+    })
+
+  if (!opts.skipAttachedEvent) {
+    sendToRelay({
+      method: 'forwardCDPEvent',
+      params: {
+        method: 'Target.attachedToTarget',
+        params: {
+          sessionId,
+          targetInfo: { ...targetInfo, attached: true },
+          waitingForDebugger: false,
+        },
+      },
+    })
+  }
+
+  setBadge(tabId, 'on')
+  dbg('attachTab.success', { tabId, sessionId, targetId })
+  return { sessionId, targetId }
+}
+
+async function ensureActiveTabAttachedFromRelay({ force = false, tabId } = {}) {
+  dbg('ensureActiveTabAttachedFromRelay.start', { force, tabId })
+  const targetTabId = Number.isInteger(tabId) ? tabId : await getPinnedOrActiveTabId()
+  if (!targetTabId) {
+    throw new Error('No active tab found')
+  }
+  manualDetachTabs.delete(targetTabId)
+
+  const activeTab = tabs.get(targetTabId)
+  if (activeTab?.state === 'connected') return
+  if (!force && activeTab?.state === 'connecting') return
+  if (autoAttachPromise) return await autoAttachPromise
+
+  autoAttachPromise = (async () => {
+    if (!force) {
+      const latestActiveTab = tabs.get(targetTabId)
+      if (latestActiveTab?.state === 'connected' || latestActiveTab?.state === 'connecting') {
+        return
+      }
+    }
+
+    await detachNonActiveTabs(targetTabId)
+
+    const activeState = tabs.get(targetTabId)
+    if (activeState?.state === 'connected' && !force) return
+
+    tabs.set(targetTabId, { state: 'connecting' })
+    setBadge(targetTabId, 'connecting')
+    void chrome.action.setTitle({
+      tabId: targetTabId,
+      title: 'Grais Debugger Browser Relay: attaching to active tab…',
+    })
+    try {
+      await attachTab(targetTabId, { skipAttachedEvent: true })
+    } catch (err) {
+      dbg('ensureActiveTabAttachedFromRelay.fail', {
+        tabId: targetTabId,
+        error: err instanceof Error ? err.message : String(err),
+      })
+      tabs.delete(targetTabId)
+      throw err instanceof Error ? err : new Error(String(err))
+    }
+  })()
+
+  try {
+    await autoAttachPromise
+  } finally {
+    autoAttachPromise = null
+  }
+}
+
+async function detachTab(tabId, reason) {
+  dbg('detachTab', { tabId, reason })
+  const tab = tabs.get(tabId)
+  if (tab?.sessionId && tab?.targetId) {
+    try {
+      sendToRelay({
+        method: 'forwardCDPEvent',
+        params: {
+          method: 'Target.detachedFromTarget',
+          params: { sessionId: tab.sessionId, targetId: tab.targetId, reason },
+        },
+      })
+    } catch {
+      // ignore
+    }
+  }
+
+  if (tab?.sessionId) tabBySession.delete(tab.sessionId)
+  tabs.delete(tabId)
+
+  for (const [childSessionId, parentTabId] of childSessionToTab.entries()) {
+    if (parentTabId === tabId) childSessionToTab.delete(childSessionId)
+  }
+
+  try {
+    await chrome.debugger.detach({ tabId })
+  } catch {
+    // ignore
+  }
+
+  setBadge(tabId, 'off')
+    void chrome.action.setTitle({
+      tabId,
+      title: 'Grais Debugger Browser Relay (click to attach/detach)',
+    })
+}
+
+async function connectOrToggleForActiveTab(tab) {
+  console.log('[Grais Debugger] toolbar icon clicked', {
+    clickedTabId: Number.isInteger(tab?.id) ? tab.id : null,
+    clickedTabUrl: tab?.url || null,
+    clickedWindowId: Number.isInteger(tab?.windowId) ? tab.windowId : null,
+    pinnedTabId: userPinnedTabId,
+    userAttachmentEnabled,
+    mode: Number.isInteger(tab?.id) ? 'explicit' : 'active-tab-fallback',
+  })
+
+  const tabId = Number.isInteger(tab?.id) ? tab.id : await getActiveTabId()
+  if (!tabId) return
+
+  const existing = tabs.get(tabId)
+  if (existing?.state === 'connected') {
+    dbg('connectOrToggleForActiveTab.toggleOff', { tabId })
+    manualDetachTabs.add(tabId)
+    userAttachmentEnabled = false
+    userPinnedTabId = null
+    await setUserAttachmentPref(false)
+    stopRelayReconnectLoop()
+    relayReconnectAttempts = 0
+    await detachTab(tabId, 'toggle')
+    return
+  }
+
+  userPinnedTabId = tabId
+  await detachNonActiveTabs(tabId)
+
+  tabs.set(tabId, { state: 'connecting' })
+  setBadge(tabId, 'connecting')
+    void chrome.action.setTitle({
+      tabId,
+      title: 'Grais Debugger Browser Relay: connecting to local relay…',
+    })
+
+  try {
+    dbg('connectOrToggleForActiveTab.connectStart', { tabId })
+    userPinnedTabId = tabId
+    stopRelayReconnectLoop()
+    relayReconnectAttempts = 0
+    await ensureRelayConnection()
+    await attachTab(tabId)
+    userAttachmentEnabled = true
+    await setUserAttachmentPref(true)
+    manualDetachTabs.delete(tabId)
+    stopRelayReconnectLoop()
+    relayReconnectAttempts = 0
+  } catch (err) {
+    dbg('connectOrToggleForActiveTab.connectFail', { tabId, error: err instanceof Error ? err.message : String(err) })
+    tabs.delete(tabId)
+    userAttachmentEnabled = false
+    userPinnedTabId = null
+    await setUserAttachmentPref(false)
+    setBadge(tabId, 'error')
+    void chrome.action.setTitle({
+      tabId,
+      title: 'Grais Debugger Browser Relay: relay not running (open options for setup)',
+    })
+    void maybeOpenHelpOnce()
+    // Extra breadcrumbs in chrome://extensions service worker logs.
+    const message = err instanceof Error ? err.message : String(err)
+    console.warn('attach failed', message, nowStack())
+  }
+}
+
+async function handleForwardCdpCommand(msg) {
+  dbg('handleForwardCdpCommand.start', { id: msg?.id, method: msg?.params?.method })
+  const method = String(msg?.params?.method || '').trim()
+  const params = msg?.params?.params || undefined
+  const sessionId = typeof msg?.params?.sessionId === 'string' ? msg.params.sessionId : undefined
+  const requestedTabId = normalizeTabId(msg?.params?.tabId)
+
+  if (method === 'Grais.debugger.ensureActiveTab') {
+    dbg('handleForwardCdpCommand.ensureActiveTab')
+    await ensureActiveTabAttachedFromRelay({ force: false })
+    return { ok: true }
+  }
+
+  if (method === 'Grais.debugger.attachTab') {
+    if (!requestedTabId) {
+      return {
+        ok: false,
+        error: 'Grais.debugger.attachTab requires params.tabId',
+      }
+    }
+    await ensureActiveTabAttachedFromRelay({ force: true, tabId: requestedTabId })
+    const attached = tabs.get(requestedTabId)
+    if (!attached?.sessionId || !attached.targetId) {
+      return {
+        ok: false,
+        error: `Failed to attach tab ${requestedTabId}`,
+      }
+    }
+    return {
+      ok: true,
+      tabId: requestedTabId,
+      sessionId: attached.sessionId,
+      targetId: attached.targetId,
+    }
+  }
+
+  if (method === 'Grais.debugger.getActiveTabMetadata') {
+    dbg('handleForwardCdpCommand.getActiveTabMetadata')
+    const explicitTabId = requestedTabId !== null ? requestedTabId : await getActiveTabId()
+    if (!explicitTabId) return { ok: true, error: 'No tab found' }
+    const tab = await chrome.tabs.get(explicitTabId).catch(() => null)
+    if (!tab) return { ok: true, error: 'Active tab not found' }
+
+    return {
+      ok: true,
+      tabId: explicitTabId,
+      url: tab.url || null,
+      title: tab.title || null,
+      status: tab.status || null,
+      audible: Boolean(tab.audible),
+      muted: Boolean(tab.mutedInfo?.muted),
+      windowId: tab.windowId,
+      pinned: Boolean(tab.pinned),
+      active: Boolean(tab.active),
+    }
+  }
+
+  const hasExplicitBinding =
+    typeof sessionId === 'string' || typeof params?.targetId === 'string' || requestedTabId !== null
+  if (!hasExplicitBinding) {
+    const activeTabId = await getActiveTabId()
+    if (
+      activeTabId &&
+      !manualDetachTabs.has(activeTabId) &&
+      (!tabs.has(activeTabId) || tabs.get(activeTabId)?.state !== 'connected')
+    ) {
+      await ensureActiveTabAttachedFromRelay({ force: true })
+    }
+  }
+
+  let attempt = 0
+  while (attempt < RECOVERABLE_SEND_RETRIES) {
+    dbg('handleForwardCdpCommand.attempt', { attempt, method, methodTarget: params?.targetId, sessionId })
+  if (tabs.size === 0) {
+      dbg('handleForwardCdpCommand.attachFromZero', { method, requestedTabId })
+      await ensureActiveTabAttachedFromRelay({ force: true, tabId: requestedTabId || undefined })
+    }
+
+    const targetId = typeof params?.targetId === 'string' ? params.targetId : undefined
+    let tabId = resolveTabIdByCommand(sessionId, targetId)
+    if (!tabId && requestedTabId !== null) {
+      tabId = requestedTabId
+      if (!tabs.has(tabId) || tabs.get(tabId)?.state !== 'connected') {
+        await ensureActiveTabAttachedFromRelay({ force: true, tabId })
+      }
+    }
+
+    if (!tabId) {
+      dbg('handleForwardCdpCommand.noTab', { method, sessionId, targetId: params?.targetId })
+      await ensureActiveTabAttachedFromRelay({ force: true, tabId: requestedTabId || undefined })
+      attempt += 1
+      await sleep(TAB_RECOVER_AUTO_REATTACH_DELAY_MS)
+      continue
+    }
+
+    /** @type {chrome.debugger.DebuggerSession} */
+    const debuggee = { tabId }
+
+    if (method === 'Runtime.enable') {
+      dbg('handleForwardCdpCommand.runtimeEnable', { tabId })
+      try {
+        await withTimeout(
+          chrome.debugger.sendCommand(debuggee, 'Runtime.disable'),
+          `Runtime.disable(${tabId})`,
+          DEBUGGER_COMMAND_TIMEOUT_MS,
+        )
+        await new Promise((r) => setTimeout(r, 50))
+      } catch {
+        // ignore
+      }
+      try {
+        return await withTimeout(
+          chrome.debugger.sendCommand(debuggee, 'Runtime.enable', params),
+          `Runtime.enable(${tabId})`,
+          DEBUGGER_COMMAND_TIMEOUT_MS,
+        )
+      } catch (err) {
+        if (isRecoverableDebuggerError(err) && attempt + 1 < RECOVERABLE_SEND_RETRIES) {
+          await recoverTabStateFromDetach(tabId)
+          attempt += 1
+          continue
+        }
+        throw err
+      }
+    }
+
+    if (method === 'Target.createTarget') {
+      const url = typeof params?.url === 'string' ? params.url : 'about:blank'
+      dbg('handleForwardCdpCommand.targetCreate', { requestedUrl: url })
+      const tab = await chrome.tabs.create({ url, active: false })
+      if (!tab.id) throw new Error('Failed to create tab')
+      await new Promise((r) => setTimeout(r, 100))
+      const attached = await attachTab(tab.id)
+      return { targetId: attached.targetId }
+    }
+
+    if (method === 'Target.closeTarget') {
+      const target = typeof params?.targetId === 'string' ? params.targetId : ''
+      dbg('handleForwardCdpCommand.targetClose', { target })
+      const toClose = target ? getTabByTargetId(target) : tabId
+      if (!toClose) return { success: false }
+      try {
+        await chrome.tabs.remove(toClose)
+      } catch {
+        return { success: false }
+      }
+      return { success: true }
+    }
+
+    if (method === 'Target.activateTarget') {
+      const target = typeof params?.targetId === 'string' ? params.targetId : ''
+      dbg('handleForwardCdpCommand.targetActivate', { target })
+      const toActivate = target ? getTabByTargetId(target) : tabId
+      if (!toActivate) return {}
+      const tab = await chrome.tabs.get(toActivate).catch(() => null)
+      if (!tab) return {}
+      if (tab.windowId) {
+        await chrome.windows.update(tab.windowId, { focused: true }).catch(() => {})
+      }
+      await chrome.tabs.update(toActivate, { active: true }).catch(() => {})
+      return {}
+    }
+
+    const tabState = tabs.get(tabId)
+    const mainSessionId = tabState?.sessionId
+    const debuggerSession =
+      sessionId && mainSessionId && sessionId !== mainSessionId
+        ? { ...debuggee, sessionId }
+        : debuggee
+
+    try {
+      dbg('handleForwardCdpCommand.sendCommand', { tabId, method })
+      return await withTimeout(
+        chrome.debugger.sendCommand(debuggerSession, method, params),
+        `${method}(${tabId})`,
+        DEBUGGER_COMMAND_TIMEOUT_MS,
+      )
+    } catch (err) {
+      dbg('handleForwardCdpCommand.sendCommandError', {
+        tabId,
+        method,
+        attempt,
+        error: err instanceof Error ? err.message : String(err),
+      })
+      if (isRecoverableDebuggerError(err) && attempt + 1 < RECOVERABLE_SEND_RETRIES) {
+        attempt += 1
+        await recoverTabStateFromDetach(tabId)
+        continue
+      }
+      throw err
+    }
+  }
+
+  throw new Error(`No attached tab for method ${method}`)
+}
+
+async function initializeAttachmentState() {
+  try {
+    const shouldBeAttached = await getUserAttachmentPref()
+    userAttachmentEnabled = Boolean(shouldBeAttached)
+    if (!shouldBeAttached) return
+    await ensureActiveTabAndRelayConnection({ force: false })
+    startRelayReconnectLoop()
+  } catch {
+    // best effort
+  }
+}
+
+function onDebuggerEvent(source, method, params) {
+  dbg('onDebuggerEvent', { tabId: source?.tabId, method })
+  const tabId = source.tabId
+  if (!tabId) return
+  const tab = tabs.get(tabId)
+  if (!tab?.sessionId) return
+
+  if (method === 'Target.attachedToTarget' && params?.sessionId) {
+    childSessionToTab.set(String(params.sessionId), tabId)
+  }
+
+  if (method === 'Target.detachedFromTarget' && params?.sessionId) {
+    childSessionToTab.delete(String(params.sessionId))
+  }
+
+  try {
+    sendToRelay({
+      method: 'forwardCDPEvent',
+      params: {
+        sessionId: source.sessionId || tab.sessionId,
+        method,
+        params,
+      },
+    })
+  } catch {
+    // ignore
+  }
+}
+
+function onDebuggerDetach(source, reason) {
+  dbg('onDebuggerDetach', { tabId: source?.tabId, reason })
+  const tabId = source.tabId
+  if (!tabId) return
+  if (!tabs.has(tabId)) return
+  void detachTab(tabId, reason)
+  if (manualDetachTabs.has(tabId)) {
+    manualDetachTabs.delete(tabId)
+    userAttachmentEnabled = false
+    stopRelayReconnectLoop()
+    return
+  }
+  scheduleAutoAttachFromDetach(reason, tabId)
+}
+
+chrome.tabs.onActivated.addListener(() => {
+  scheduleActiveTabReattachFromEvent()
+})
+
+chrome.tabs.onUpdated.addListener((_, changeInfo, tab) => {
+  if (!tab?.active) return
+  if (changeInfo.status !== 'complete') return
+  scheduleActiveTabReattachFromEvent()
+})
+
+chrome.tabs.onRemoved.addListener((removedTabId) => {
+  if (removedTabId !== userPinnedTabId) return
+  userPinnedTabId = null
+  userAttachmentEnabled = false
+  stopRelayReconnectLoop()
+})
+
+chrome.action.onClicked.addListener((tab) => void connectOrToggleForActiveTab(tab))
+
+void initializeAttachmentState()
+
+chrome.runtime.onInstalled.addListener(() => {
+  void setUserAttachmentPref(false)
+  // Useful: first-time instructions.
+  void chrome.runtime.openOptionsPage()
+})
