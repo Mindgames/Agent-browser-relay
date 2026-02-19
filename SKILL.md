@@ -27,7 +27,7 @@ Use this skill to attach to a chosen Chrome tab through the bundled Grais Debugg
 
    - `chrome://extensions`
    - Enable developer mode
-   - Load unpacked from `~/codex/grais-debug-relay/extension`
+   - Load unpacked from `~/.codex/skills/private/grais-tab-webdata-reader/extension`
 
 3. Attach the extension to the target tab (click toolbar icon)
 
