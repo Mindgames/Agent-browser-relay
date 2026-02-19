@@ -1,15 +1,15 @@
 # Grais Debugger Chrome Extension (Browser Relay)
 
 ## Purpose
-This repository provides a local browser-relay so Grais can attach to the **active Chrome tab**, execute script in that tab, and return structured page data to an agent workflow.
+This repository provides a local browser-relay so Grais can attach to a **chosen Chrome tab**, execute script in that tab, and return structured page data to an agent workflow.
 
-- The extension manages active-tab attachment from the toolbar button.
+- The extension manages tab attachment from the toolbar button.
 - The relay server tunnels requests from the skill into Chrome DevTools Protocol (CDP).
 - The `grais-tab-webdata-reader` skill reads and consumes the result payload from the relay and prints JSON directly to stdout.
 
 ## Capabilities
-- Attach or detach the active tab from the extension toolbar.
-- Recover/reconnect when the active tab changes.
+- Attach or detach the chosen tab from the extension toolbar.
+- Recover/reconnect when tab context changes.
 - Execute JavaScript in-page via CDP (`Runtime.evaluate`).
 - Default extraction payload: `url`, `title`, `text`, `links`, `metaDescription`.
 - Full DOM extraction with custom expression (e.g. `document.documentElement.outerHTML`).
@@ -22,12 +22,12 @@ This repository provides a local browser-relay so Grais can attach to the **acti
 1. Install and open extension
    - Chrome → `chrome://extensions`
    - Enable Developer mode
-   - Load unpacked and select `/Users/mathiasasberg/Projects/grais/api+chrome/chrome-debugger/extension`
+   - Load unpacked and select `~/codex/grais-debug-relay/extension`
    - Pin Grais Debugger icon to the toolbar
 2. Start relay server:
 
    ```bash
-   cd /Users/mathiasasberg/Projects/grais/api+chrome/chrome-debugger
+   cd ~/codex/grais-debug-relay
    npm install
    npm run relay:start
    ```
@@ -48,7 +48,7 @@ This repository provides a local browser-relay so Grais can attach to the **acti
    ```
 
 5. Human attach gate (required for agent workflows):
-   - After relay is started, the agent must pause and ask the human to attach the active tab:
+   - After relay is started, the agent must pause and ask the human to attach the target tab:
      - Open/focus the target tab in Chrome.
      - Click the Grais Debugger toolbar icon so badge shows `ON`.
    - The agent must wait for human confirmation before continuing.
@@ -66,7 +66,7 @@ This repository provides a local browser-relay so Grais can attach to the **acti
   - `npm run relay:status`
   - `npm run relay:stop`
   - `node scripts/read-active-tab.js`
-- After `relay:start`, agent must stop and ask the human to attach the active tab, then wait for confirmation.
+- After `relay:start`, agent must stop and ask the human to attach the target tab, then wait for confirmation.
 - Agent must run `node scripts/read-active-tab.js --check --wait-for-attach --attach-timeout-ms 120000` before any data read and continue only on success.
 - Agent must not stop/restart relay during a task unless the human explicitly asks for restart or a hard failure requires it.
 - If canonical scripts are missing, fail fast with a concrete error and stop; do not pivot to a different pipeline.
@@ -80,7 +80,7 @@ curl -s http://127.0.0.1:18792/status
 Expect `extensionConnected: true` and low queue depth before running fetches.
 
 ## Workflow
-1. Open the target page and make it active in Chrome.
+1. Open and focus the target tab in Chrome.
 2. Click the Grais Debugger icon to attach.
 3. Validate readiness before each read:
 
@@ -93,7 +93,7 @@ Expect `extensionConnected: true` and low queue depth before running fetches.
 
    If relay is reachable this command waits for an active attachment instead of immediate failure.
 
-4. Read default extraction from active tab:
+4. Read default extraction from attached tab:
 
    ```bash
    node scripts/read-active-tab.js --pretty false
@@ -122,7 +122,7 @@ Expect `extensionConnected: true` and low queue depth before running fetches.
 
 ## Troubleshooting
 - Red `!` badge: relay is unreachable or extension cannot attach.
-- `Timed out waiting for Runtime.evaluate`: usually means no active attachment or an inactive target page.
+- `Timed out waiting for Runtime.evaluate`: usually means the tab is not attached.
 - If attachment drops after tab changes, click the toolbar icon once and run `--check` again.
 - If you see unstable behavior, audit processes:
 
@@ -133,7 +133,7 @@ npm run relay:status
 
 ## Reliability notes
 - Controller commands are queued while extension reconnects and replayed after the relay sees the extension again.
-- When the extension is ON (`ON` badge), it runs a reconnect loop: it keeps trying to re-establish relay socket and re-attach to the active tab automatically.
+- When the extension is ON (`ON` badge), it runs a reconnect loop: it keeps trying to re-establish relay socket and restore tab attachment automatically.
 - The relay now tracks extension heartbeats (`Grais.extensionHeartbeat`) and closes stale extension connections.
 - Request windows remain bounded by timeouts, so callers receive deterministic errors for retries instead of waiting indefinitely.
 

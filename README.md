@@ -1,9 +1,9 @@
 # Grais Debugger Chrome Extension (Browser Relay)
 
-Use this project to let Grais read data from the **active Chrome tab** through a local relay.
+Use this project to let Grais read data from the **attached Chrome tab** through a local relay.
 
 ## What runs where
-- Extension (`extension/background.js`): attaches/detaches the active tab.
+- Extension (`extension/background.js`): attaches/detaches a chosen tab.
 - Relay (`relay-server.js`): local bridge on `127.0.0.1:18792`.
 - Reader (`scripts/read-active-tab.js`): executes reads and prints JSON.
 
@@ -39,19 +39,33 @@ cd ~/codex/grais-debug-relay
 npm run relay:start
 ```
 
-2. Human attach step (required for agent runs):
+2. Confirm relay is up:
+
+```bash
+npm run relay:status
+```
+
+Expected:
+- `ok: true`
+- `extensionConnected: true` after you complete the attach step below
+
+3. Human attach step (required for agent runs):
    - Open/focus target tab in Chrome
-   - Click Grais Debugger icon
+   - Click Grais Debugger icon on that tab to attach it
    - Confirm badge shows `ON`
    - Tell agent when done
 
-3. Verify attach before any read:
+4. Verify attach before any read:
 
 ```bash
 node scripts/read-active-tab.js --check --wait-for-attach --attach-timeout-ms 120000
 ```
 
 Continue only when this command succeeds.
+
+Note:
+- Reads target the currently attached tab.
+- If attach state drifts (for example after reconnect/reload), click the icon on the intended tab and run the check command again.
 
 ## 4) Read data
 Default structured payload (`url`, `title`, `text`, `links`, `metaDescription`):
@@ -101,13 +115,14 @@ Notes:
 npm run relay:status
 ```
 
-- Extension not attached (`extensionConnected: false`):
+- Extension bridge disconnected (`extensionConnected: false`):
   - Re-focus target tab
   - Click extension icon again
+  - Re-run `npm run relay:status`
   - Re-run check command
 
 - `Timed out waiting for Runtime.evaluate`:
-  - Tab is usually not attached/active
+  - Tab is usually not attached
   - Re-attach and re-run:
 
 ```bash

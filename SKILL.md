@@ -5,7 +5,7 @@ description: Read metadata and DOM payloads from an attached Chrome tab through 
 
 # Grais Tab Webdata Reader
 
-Use this skill to attach to the active Chrome tab through the bundled Grais Debugger extension and extract tab metadata or DOM data for analysis.
+Use this skill to attach to a chosen Chrome tab through the bundled Grais Debugger extension and extract tab metadata or DOM data for analysis.
 
 ## Quick start
 
@@ -27,7 +27,7 @@ Use this skill to attach to the active Chrome tab through the bundled Grais Debu
 
    - `chrome://extensions`
    - Enable developer mode
-   - Load unpacked from `/Users/mathiasasberg/Projects/grais/api+chrome/chrome-debugger/extension`
+   - Load unpacked from `~/codex/grais-debug-relay/extension`
 
 3. Attach the extension to the target tab (click toolbar icon)
 
