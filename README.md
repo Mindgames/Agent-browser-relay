@@ -18,10 +18,14 @@ cd grais-tab-webdata-reader
 npm install
 ```
 
-If you use HTTPS instead of SSH:
+If you use HTTPS instead of SSH, run:
 
 ```bash
+mkdir -p ~/.codex/skills/private
+cd ~/.codex/skills/private
 git clone https://github.com/Replypilot/grais-debug-relay.git grais-tab-webdata-reader
+cd grais-tab-webdata-reader
+npm install
 ```
 
 ## 2) One-time Chrome setup
