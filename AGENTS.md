@@ -22,12 +22,12 @@ This repository provides a local browser-relay so Grais can attach to a **chosen
 1. Install and open extension
    - Chrome → `chrome://extensions`
    - Enable Developer mode
-   - Load unpacked and select `~/codex/grais-debug-relay/extension`
+   - Load unpacked and select `~/.codex/skills/private/grais-tab-webdata-reader/extension`
    - Pin Grais Debugger icon to the toolbar
 2. Start relay server:
 
    ```bash
-   cd ~/codex/grais-debug-relay
+   cd ~/.codex/skills/private/grais-tab-webdata-reader
    npm install
    npm run relay:start
    ```
