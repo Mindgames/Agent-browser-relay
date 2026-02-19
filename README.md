@@ -8,34 +8,34 @@ Use this project to let Grais read data from the **attached Chrome tab** through
 - Reader (`scripts/read-active-tab.js`): executes reads and prints JSON.
 
 ## 1) Clone and install (recommended path)
-Clone this repo under `~/codex`:
+If you already use Codex, clone this repo directly into your local skill folder:
 
 ```bash
-mkdir -p ~/codex
-cd ~/codex
-git clone git@github.com:Replypilot/grais-debug-relay.git
-cd grais-debug-relay
+mkdir -p ~/.codex/skills/private
+cd ~/.codex/skills/private
+git clone git@github.com:Replypilot/grais-debug-relay.git grais-tab-webdata-reader
+cd grais-tab-webdata-reader
 npm install
 ```
 
 If you use HTTPS instead of SSH:
 
 ```bash
-git clone https://github.com/Replypilot/grais-debug-relay.git
+git clone https://github.com/Replypilot/grais-debug-relay.git grais-tab-webdata-reader
 ```
 
 ## 2) One-time Chrome setup
 1. Load extension in Chrome:
    - Open `chrome://extensions`
    - Enable Developer mode
-   - Load unpacked from `~/codex/grais-debug-relay/extension`
+   - Load unpacked from `~/.codex/skills/private/grais-tab-webdata-reader/extension`
    - Pin Grais Debugger icon
 
 ## 3) Start a session (always this order)
 1. Start relay:
 
 ```bash
-cd ~/codex/grais-debug-relay
+cd ~/.codex/skills/private/grais-tab-webdata-reader
 npm run relay:start
 ```
 
