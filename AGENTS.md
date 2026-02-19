@@ -43,7 +43,7 @@ This repository provides a local browser-relay so Grais can attach to a **chosen
 4. Keep relay running continuously while using the extension and only stop when finished:
 
    ```bash
-   npm run relay:status
+   npm run relay:status -- --status-timeout-ms 3000
    npm run relay:stop
    ```
 
@@ -74,10 +74,11 @@ This repository provides a local browser-relay so Grais can attach to a **chosen
 Before running reads, also verify relay health:
 
 ```bash
-curl -s http://127.0.0.1:18792/status
+curl --max-time 3 -sS http://127.0.0.1:18793/status
 ```
 
 Expect `extensionConnected: true` and low queue depth before running fetches.
+Never run bare `curl` without a timeout for relay checks.
 
 ## Workflow
 1. Open and focus the target tab in Chrome.
@@ -127,7 +128,7 @@ Expect `extensionConnected: true` and low queue depth before running fetches.
 - If you see unstable behavior, audit processes:
 
 ```bash
-npm run relay:status
+npm run relay:status -- --status-timeout-ms 3000
 ```
 - Single running relay instance is enforced by an OS lock; stale lock files are cleaned automatically.
 

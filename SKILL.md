@@ -13,7 +13,7 @@ Use this skill to attach to a chosen Chrome tab through the bundled Grais Debugg
 
    ```bash
    npm install
-   npm run relay:start
+   npm run relay:start -- --status-timeout-ms 3000
    ```
 
    `relay:start` auto-stops after 2 hours by default. Override if needed:
@@ -48,6 +48,9 @@ Use this skill to attach to a chosen Chrome tab through the bundled Grais Debugg
   - `npm run relay:status`
   - `npm run relay:stop`
   - `node scripts/read-active-tab.js`
+- For relay health checks, always use explicit timeouts to avoid hangs:
+  - `npm run relay:status -- --status-timeout-ms 3000`
+  - `curl --max-time 3 -sS http://127.0.0.1:18793/status`
 - After `relay:start`, pause and ask the human to attach the target tab before any read.
 - Run `node scripts/read-active-tab.js --check --wait-for-attach --attach-timeout-ms 120000` before reads and proceed only when it succeeds.
 - Do not stop/restart relay during the task unless the human requests it or recovery is explicitly required.

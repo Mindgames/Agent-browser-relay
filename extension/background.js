@@ -1,4 +1,4 @@
-const DEFAULT_PORT = 18792
+const DEFAULT_PORT = 18793
 const RECOVERABLE_SEND_RETRIES = 2
 const RECOVER_RETRY_DELAY_MS = 600
 const TAB_RECOVER_AUTO_REATTACH_DELAY_MS = 250
@@ -11,7 +11,7 @@ const FORWARD_COMMAND_TIMEOUT_MS = 10000
 const DEBUG_LOG = true
 
 const BADGE = {
-  on: { text: 'ON', color: '#FF5A36' },
+  on: { text: 'ON', color: '#16A34A' },
   off: { text: '', color: '#000000' },
   connecting: { text: '…', color: '#F59E0B' },
   error: { text: '!', color: '#B91C1C' },
@@ -79,6 +79,31 @@ async function setUserAttachmentPref(enabled) {
   await chrome.storage.local.set({ userAttachmentEnabled: Boolean(enabled) })
 }
 
+async function getPinnedTabPref() {
+  const stored = await chrome.storage.local.get(['userPinnedTabId'])
+  return normalizeTabId(stored.userPinnedTabId)
+}
+
+async function setPinnedTabPref(tabId) {
+  const normalized = normalizeTabId(tabId)
+  if (normalized === null) {
+    await chrome.storage.local.remove(['userPinnedTabId'])
+    return
+  }
+  await chrome.storage.local.set({ userPinnedTabId: normalized })
+}
+
+async function disableAttachmentState() {
+  userAttachmentEnabled = false
+  userPinnedTabId = null
+  stopRelayReconnectLoop()
+  relayReconnectAttempts = 0
+  await Promise.allSettled([
+    setUserAttachmentPref(false),
+    setPinnedTabPref(null),
+  ])
+}
+
 function setBadge(tabId, kind) {
   const cfg = BADGE[kind]
   void chrome.action.setBadgeText({ tabId, text: cfg.text })
@@ -136,13 +161,12 @@ async function getActiveTabId() {
   return typeof fallback?.id === 'number' ? fallback.id : null
 }
 
-async function getPinnedOrActiveTabId() {
-  if (Number.isInteger(userPinnedTabId)) {
-    const pinnedTab = await chrome.tabs.get(userPinnedTabId).catch(() => null)
-    if (pinnedTab?.id) return pinnedTab.id
-    userPinnedTabId = null
-  }
-  return getActiveTabId()
+async function resolvePinnedTabId() {
+  if (!Number.isInteger(userPinnedTabId)) return null
+  const pinnedTab = await chrome.tabs.get(userPinnedTabId).catch(() => null)
+  if (pinnedTab?.id) return pinnedTab.id
+  await disableAttachmentState()
+  return null
 }
 
 function normalizeTabId(value) {
@@ -162,8 +186,8 @@ async function detachNonActiveTabs(keepTabId) {
 }
 
 function scheduleActiveTabReattachFromEvent() {
-  if (userPinnedTabId !== null) return
   if (!userAttachmentEnabled) return
+  if (!Number.isInteger(userPinnedTabId)) return
   if (activeTabAutoReattachEventTimer) {
     clearTimeout(activeTabAutoReattachEventTimer)
   }
@@ -177,17 +201,18 @@ function scheduleActiveTabReattachFromEvent() {
 async function ensureActiveTabAndRelayConnection({ force = false } = {}) {
   dbg('ensureActiveTabAndRelayConnection', { force })
   if (!userAttachmentEnabled) return
+  const pinnedTabId = await resolvePinnedTabId()
+  if (!pinnedTabId) return
   try {
     await ensureRelayConnection()
   } catch {
     return
   }
 
-  const activeTabId = await getActiveTabId()
-  if (!force && activeTabId && manualDetachTabs.has(activeTabId)) return
+  if (!force && manualDetachTabs.has(pinnedTabId)) return
 
   try {
-    await ensureActiveTabAttachedFromRelay({ force })
+    await ensureActiveTabAttachedFromRelay({ force, tabId: pinnedTabId })
   } catch {
     // best effort while relay is transiently unavailable
   }
@@ -379,6 +404,7 @@ function scheduleAutoAttachFromDetach(reason, tabId) {
   dbg('scheduleAutoAttachFromDetach', { reason, tabId })
   if (!userAttachmentEnabled) return
   if (reason === 'toggle' || reason === 'recovery') return
+  if (Number.isInteger(userPinnedTabId) && tabId !== userPinnedTabId) return
   if (!tabId || manualDetachTabs.has(tabId)) return
   if (activeTabAutoReattachTimer) {
     clearTimeout(activeTabAutoReattachTimer)
@@ -543,9 +569,9 @@ async function attachTab(tabId, opts = {}) {
 
 async function ensureActiveTabAttachedFromRelay({ force = false, tabId } = {}) {
   dbg('ensureActiveTabAttachedFromRelay.start', { force, tabId })
-  const targetTabId = Number.isInteger(tabId) ? tabId : await getPinnedOrActiveTabId()
+  const targetTabId = Number.isInteger(tabId) ? tabId : await resolvePinnedTabId()
   if (!targetTabId) {
-    throw new Error('No active tab found')
+    throw new Error('No pinned tab selected. Click Grais Debugger on the target tab to attach.')
   }
   manualDetachTabs.delete(targetTabId)
 
@@ -646,16 +672,13 @@ async function connectOrToggleForActiveTab(tab) {
   if (existing?.state === 'connected') {
     dbg('connectOrToggleForActiveTab.toggleOff', { tabId })
     manualDetachTabs.add(tabId)
-    userAttachmentEnabled = false
-    userPinnedTabId = null
-    await setUserAttachmentPref(false)
-    stopRelayReconnectLoop()
-    relayReconnectAttempts = 0
+    await disableAttachmentState()
     await detachTab(tabId, 'toggle')
     return
   }
 
   userPinnedTabId = tabId
+  await setPinnedTabPref(tabId)
   await detachNonActiveTabs(tabId)
 
   tabs.set(tabId, { state: 'connecting' })
@@ -673,16 +696,16 @@ async function connectOrToggleForActiveTab(tab) {
     await ensureRelayConnection()
     await attachTab(tabId)
     userAttachmentEnabled = true
+    userPinnedTabId = tabId
     await setUserAttachmentPref(true)
+    await setPinnedTabPref(tabId)
     manualDetachTabs.delete(tabId)
     stopRelayReconnectLoop()
     relayReconnectAttempts = 0
   } catch (err) {
     dbg('connectOrToggleForActiveTab.connectFail', { tabId, error: err instanceof Error ? err.message : String(err) })
     tabs.delete(tabId)
-    userAttachmentEnabled = false
-    userPinnedTabId = null
-    await setUserAttachmentPref(false)
+    await disableAttachmentState()
     setBadge(tabId, 'error')
     void chrome.action.setTitle({
       tabId,
@@ -733,10 +756,15 @@ async function handleForwardCdpCommand(msg) {
 
   if (method === 'Grais.debugger.getActiveTabMetadata') {
     dbg('handleForwardCdpCommand.getActiveTabMetadata')
-    const explicitTabId = requestedTabId !== null ? requestedTabId : await getActiveTabId()
-    if (!explicitTabId) return { ok: true, error: 'No tab found' }
+    const explicitTabId = requestedTabId !== null ? requestedTabId : await resolvePinnedTabId()
+    if (!explicitTabId) {
+      return {
+        ok: false,
+        error: 'No pinned tab selected. Click Grais Debugger on the target tab to attach.',
+      }
+    }
     const tab = await chrome.tabs.get(explicitTabId).catch(() => null)
-    if (!tab) return { ok: true, error: 'Active tab not found' }
+    if (!tab) return { ok: false, error: 'Pinned tab not found' }
 
     return {
       ok: true,
@@ -754,21 +782,14 @@ async function handleForwardCdpCommand(msg) {
 
   const hasExplicitBinding =
     typeof sessionId === 'string' || typeof params?.targetId === 'string' || requestedTabId !== null
-  if (!hasExplicitBinding) {
-    const activeTabId = await getActiveTabId()
-    if (
-      activeTabId &&
-      !manualDetachTabs.has(activeTabId) &&
-      (!tabs.has(activeTabId) || tabs.get(activeTabId)?.state !== 'connected')
-    ) {
-      await ensureActiveTabAttachedFromRelay({ force: true })
-    }
+  if (!hasExplicitBinding && userAttachmentEnabled && tabs.size === 0) {
+    await ensureActiveTabAttachedFromRelay({ force: false })
   }
 
   let attempt = 0
   while (attempt < RECOVERABLE_SEND_RETRIES) {
     dbg('handleForwardCdpCommand.attempt', { attempt, method, methodTarget: params?.targetId, sessionId })
-  if (tabs.size === 0) {
+    if (tabs.size === 0) {
       dbg('handleForwardCdpCommand.attachFromZero', { method, requestedTabId })
       await ensureActiveTabAttachedFromRelay({ force: true, tabId: requestedTabId || undefined })
     }
@@ -893,9 +914,22 @@ async function handleForwardCdpCommand(msg) {
 
 async function initializeAttachmentState() {
   try {
-    const shouldBeAttached = await getUserAttachmentPref()
+    const [shouldBeAttached, pinnedTabPref] = await Promise.all([
+      getUserAttachmentPref(),
+      getPinnedTabPref(),
+    ])
     userAttachmentEnabled = Boolean(shouldBeAttached)
+    userPinnedTabId = pinnedTabPref
     if (!shouldBeAttached) return
+    if (!Number.isInteger(userPinnedTabId)) {
+      await disableAttachmentState()
+      return
+    }
+    const pinnedTab = await chrome.tabs.get(userPinnedTabId).catch(() => null)
+    if (!pinnedTab?.id) {
+      await disableAttachmentState()
+      return
+    }
     await ensureActiveTabAndRelayConnection({ force: false })
     startRelayReconnectLoop()
   } catch {
@@ -940,10 +974,10 @@ function onDebuggerDetach(source, reason) {
   void detachTab(tabId, reason)
   if (manualDetachTabs.has(tabId)) {
     manualDetachTabs.delete(tabId)
-    userAttachmentEnabled = false
-    stopRelayReconnectLoop()
+    void disableAttachmentState()
     return
   }
+  if (Number.isInteger(userPinnedTabId) && tabId !== userPinnedTabId) return
   scheduleAutoAttachFromDetach(reason, tabId)
 }
 
@@ -959,9 +993,7 @@ chrome.tabs.onUpdated.addListener((_, changeInfo, tab) => {
 
 chrome.tabs.onRemoved.addListener((removedTabId) => {
   if (removedTabId !== userPinnedTabId) return
-  userPinnedTabId = null
-  userAttachmentEnabled = false
-  stopRelayReconnectLoop()
+  void disableAttachmentState()
 })
 
 chrome.action.onClicked.addListener((tab) => void connectOrToggleForActiveTab(tab))
@@ -969,7 +1001,10 @@ chrome.action.onClicked.addListener((tab) => void connectOrToggleForActiveTab(ta
 void initializeAttachmentState()
 
 chrome.runtime.onInstalled.addListener(() => {
-  void setUserAttachmentPref(false)
+  void Promise.allSettled([
+    setUserAttachmentPref(false),
+    setPinnedTabPref(null),
+  ])
   // Useful: first-time instructions.
   void chrome.runtime.openOptionsPage()
 })

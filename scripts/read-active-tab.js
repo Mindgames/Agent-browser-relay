@@ -3,7 +3,7 @@
 
 const http = require('node:http')
 
-const DEFAULT_PORT = 18792
+const DEFAULT_PORT = 18793
 const DEFAULT_HOST = '127.0.0.1'
 const DEFAULT_TIMEOUT_MS = 3000
 const DEFAULT_RETRIES = 2
@@ -1223,12 +1223,6 @@ async function checkBridge() {
   relay.ping = true
 
   try {
-    await sendRelayCommand('Grais.debugger.ensureActiveTab')
-  } catch {
-    // Compatibility: older extension versions may not expose this command.
-  }
-
-  try {
     const pingResult = await sendRelayCommand('Runtime.evaluate', {
       expression: '1 + 1',
       returnByValue: true,
@@ -1379,7 +1373,7 @@ function waitForSocket(ms) {
 
 function printUsage() {
   console.log(`Usage:
-  node read-active-tab.js [--host 127.0.0.1] [--port 18792] [--selector "body"] [--preset "default|whatsapp|whatsapp-messages|wa|chat-audit|chat"]
+  node read-active-tab.js [--host 127.0.0.1] [--port 18793] [--selector "body"] [--preset "default|whatsapp|whatsapp-messages|wa|chat-audit|chat"]
     [--wait-for-attach] [--attach-timeout-ms 120000] [--attach-poll-ms 500]
     [--status-timeout-ms 1200]
     [--metadata]

@@ -4,7 +4,7 @@ Use this project to let Grais read data from the **attached Chrome tab** through
 
 ## What runs where
 - Extension (`extension/background.js`): attaches/detaches a chosen tab.
-- Relay (`relay-server.js`): local bridge on `127.0.0.1:18792`.
+- Relay (`relay-server.js`): local bridge on `127.0.0.1:18793`.
 - Reader (`scripts/read-active-tab.js`): executes reads and prints JSON.
 
 ## 1) Clone and install
@@ -38,13 +38,13 @@ npm install
 
 ```bash
 cd grais-tab-webdata-reader
-npm run relay:start
+npm run relay:start -- --status-timeout-ms 3000
 ```
 
 2. Confirm relay is up:
 
 ```bash
-npm run relay:status
+npm run relay:status -- --status-timeout-ms 3000
 ```
 
 Expected:
@@ -96,7 +96,7 @@ node scripts/read-active-tab.js \
 Status:
 
 ```bash
-npm run relay:status
+npm run relay:status -- --status-timeout-ms 3000
 ```
 
 Stop:
@@ -114,13 +114,13 @@ Notes:
 - Relay unreachable:
 
 ```bash
-npm run relay:status
+npm run relay:status -- --status-timeout-ms 3000
 ```
 
 - Extension bridge disconnected (`extensionConnected: false`):
   - Re-focus target tab
   - Click extension icon again
-  - Re-run `npm run relay:status`
+  - Re-run `npm run relay:status -- --status-timeout-ms 3000`
   - Re-run check command
 
 - `Timed out waiting for Runtime.evaluate`:
