@@ -1229,7 +1229,7 @@ function requestJson(url, timeoutMs = DEFAULT_STATUS_TIMEOUT_MS) {
 
 async function getRelayStatus(throwOnError = true) {
   try {
-    const response = await requestJson(relayStatusUrl, statusTimeoutMs)
+    const response = await requestJson(`${relayStatusUrl}?all=true`, statusTimeoutMs)
     return { ok: true, ...(typeof response === 'object' && response ? response : {}) }
   } catch (error) {
     if (throwOnError) {
@@ -1239,12 +1239,94 @@ async function getRelayStatus(throwOnError = true) {
   }
 }
 
+function parseStatusPort(value) {
+  const parsed = Number.parseInt(String(value || ''), 10)
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65535) return null
+  return parsed
+}
+
+function sanitizeStatusTab(value) {
+  if (!value || typeof value !== 'object') return null
+  return {
+    tabId: Number.isInteger(value.tabId) ? value.tabId : null,
+    url: typeof value.url === 'string' ? value.url : null,
+    title: typeof value.title === 'string' ? value.title : null,
+    windowId: Number.isInteger(value.windowId) ? value.windowId : null,
+  }
+}
+
+function summarizeRelayPorts(statusPayload) {
+  const rawPorts = Array.isArray(statusPayload?.ports)
+    ? statusPayload.ports
+    : [
+        {
+          port: parseStatusPort(statusPayload?.port) || relayPort,
+          extensionConnected: statusPayload?.extensionConnected,
+          extensionLastSeenAgoMs: statusPayload?.extensionLastSeenAgoMs,
+          queuedControllerCommands: statusPayload?.queuedControllerCommands,
+          activeTab: statusPayload?.activeTab,
+          attachedTabs: statusPayload?.attachedTabs,
+        },
+      ]
+
+  const ports = []
+  for (const raw of rawPorts) {
+    const port = parseStatusPort(raw.port)
+    if (!port) continue
+    ports.push({
+      port,
+      extensionConnected: Boolean(raw.extensionConnected),
+      extensionLastSeenAgoMs:
+        Number.isFinite(Number(raw.extensionLastSeenAgoMs)) ? Number(raw.extensionLastSeenAgoMs) : null,
+      queuedControllerCommands: Number.isFinite(Number(raw.queuedControllerCommands))
+        ? Number(raw.queuedControllerCommands)
+        : null,
+      activeTab: sanitizeStatusTab(raw.activeTab),
+      attachedTabs: Array.isArray(raw.attachedTabs) ? raw.attachedTabs.map(sanitizeStatusTab).filter(Boolean) : [],
+    })
+  }
+  ports.sort((a, b) => a.port - b.port)
+  const activePorts = ports.filter((entry) => entry.extensionConnected).map((entry) => entry.port)
+  return { ports, activePorts }
+}
+
+function buildPortMismatchHint(snapshot) {
+  const mismatchPorts = snapshot.activePorts.filter((port) => port !== relayPort)
+  if (mismatchPorts.length === 0) return null
+
+  const details = []
+  for (const port of mismatchPorts) {
+    const match = snapshot.ports.find((entry) => entry.port === port)
+    const tab = match?.activeTab
+    if (!tab) {
+      details.push(`${port}:unknown-tab`)
+      continue
+    }
+    const title = tab.title || 'untitled'
+    const url = tab.url || 'unknown'
+    details.push(`${port}: ${title} ${url}`)
+  }
+
+  return `Extension is attached on port(s): ${details.join('; ')}`
+}
+
+function assertNoPortMismatch(snapshot) {
+  const mismatchHint = buildPortMismatchHint(snapshot)
+  if (!mismatchHint) return
+  throw new Error(
+    `${mismatchHint}. This command is targeting ${relayPort}. Re-run using one of: ${snapshot.activePorts.join(', ')}.`,
+  )
+}
+
 async function assertRelayConnectionReady() {
   const status = await getRelayStatus(false)
   if (!status.ok) {
     throw new Error(`Relay status check failed: ${status.error || 'Relay not reachable'} at ${relayStatusUrl}`)
   }
-  if (!status.extensionConnected) {
+  const snapshot = summarizeRelayPorts(status)
+  const targetStatus = snapshot.ports.find((entry) => entry.port === relayPort) || null
+  if (!targetStatus || !targetStatus.extensionConnected) {
+    assertNoPortMismatch(snapshot)
     throw new Error(
       `Relay is reachable (${relayStatusUrl}) but extension is not connected. Open the target tab and click Grais Debugger.`,
     )
@@ -1302,15 +1384,23 @@ async function checkBridge() {
       relay.reachable = false
       throw new Error(`Relay status check failed: ${status.error || 'not reachable'}`)
     }
-    relay.extensionConnected = Boolean(status.extensionConnected)
-    relay.extensionLastSeenAgoMs =
-      status.extensionLastSeenAgoMs === null || status.extensionLastSeenAgoMs === undefined ? null : Number(status.extensionLastSeenAgoMs)
-    relay.queueDepth = Number.isFinite(Number(status.queuedControllerCommands))
-      ? Number(status.queuedControllerCommands)
-      : null
+    const snapshot = summarizeRelayPorts(status)
+    const targetStatus = snapshot.ports.find((entry) => entry.port === relayPort) || null
+    relay.extensionConnected = Boolean(targetStatus ? targetStatus.extensionConnected : status.extensionConnected)
+    relay.extensionLastSeenAgoMs = targetStatus?.extensionLastSeenAgoMs ?? null
+    relay.queueDepth = Number.isFinite(Number(targetStatus?.queuedControllerCommands))
+      ? Number(targetStatus.queuedControllerCommands)
+      : Number.isFinite(Number(status.queuedControllerCommands))
+        ? Number(status.queuedControllerCommands)
+        : null
+    relay.activePorts = snapshot.activePorts
+    relay.ports = snapshot.ports
 
     if (!relay.extensionConnected) {
-      extension.error = 'Extension is not connected to relay.'
+      const mismatchHint = buildPortMismatchHint(snapshot)
+      extension.error =
+        mismatchHint ||
+        'Extension is not connected to relay.'
       return {
         ok: false,
         relay,
@@ -1411,13 +1501,17 @@ async function waitForAttachmentReady(options = {}) {
 
   const start = Date.now()
   while (Date.now() - start < timeoutMs) {
-    try {
-      const status = await checkBridge()
-      if (status.ok) return
-      lastFailure = status
-    } catch {
-      lastFailure = { error: 'checkBridge threw', relay: { statusUrl: relayStatusUrl } }
+    const status = await checkBridge()
+    if (status.ok) return
+    if (
+      status.relay?.activePorts &&
+      Array.isArray(status.relay.activePorts) &&
+      !status.relay.activePorts.includes(relayPort) &&
+      status.relay.activePorts.length > 0
+    ) {
+      throw new Error(status.extension.error || 'Extension attached to different relay port')
     }
+    lastFailure = status
     await sleep(pollMs)
   }
 

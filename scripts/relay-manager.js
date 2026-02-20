@@ -12,8 +12,9 @@ const DEFAULT_START_TIMEOUT_MS = 10000
 const DEFAULT_START_POLL_MS = 250
 const DEFAULT_STATUS_TIMEOUT_MS = 1200
 const DEFAULT_AUTO_STOP_MS = 2 * 60 * 60 * 1000
-const REPO_ROOT = path.resolve(__dirname, '..')
+const REPO_ROOT = path.resolve(fs.realpathSync(__dirname), '..')
 const RELAY_FILE_PREFIX = 'grais-debugger-relay'
+const ALLOWED_PORT_ACTIONS = ['add', 'remove']
 
 const args = parseArgs(process.argv.slice(2))
 const command = args.command
@@ -28,7 +29,8 @@ if (!command) {
 }
 
 const host = String(args.host || DEFAULT_HOST).trim() || DEFAULT_HOST
-const port = parsePort(args.port, DEFAULT_PORT)
+const relayPorts = parsePortList(args.ports || args.port, [DEFAULT_PORT])
+const port = relayPorts[0]
 const timeoutMs = parsePositiveInt(args.timeout, DEFAULT_TIMEOUT_MS, '--timeout')
 const startTimeoutMs = parsePositiveInt(args.startTimeoutMs, DEFAULT_START_TIMEOUT_MS, '--start-timeout-ms')
 const statusTimeoutMs = parsePositiveInt(
@@ -60,6 +62,10 @@ async function main() {
     await stopRelay()
     return
   }
+  if (command === 'ports') {
+    await updateRelayPorts()
+    return
+  }
 
   throw new Error(`Unknown command "${command}"`)
 }
@@ -67,12 +73,18 @@ async function main() {
 async function startRelay() {
   const preCheck = await fetchRelayStatus(false)
   if (preCheck.ok) {
+    const activePorts =
+      Array.isArray(preCheck.extensionPorts) && preCheck.extensionPorts.length > 0 ? preCheck.extensionPorts : []
+    const statusLabel = activePorts.length > 0 ? ` (extension active on ${activePorts.join(', ')})` : ''
     const state = readRelayState()
     const now = Date.now()
     const autoStopInMs =
       Number.isInteger(state?.autoStopAt) && state.autoStopAt > now ? state.autoStopAt - now : null
-    const ttlLabel = autoStopInMs !== null ? ` (auto-stop in ${Math.ceil(autoStopInMs / 1000)}s)` : ''
-    console.log(`Relay already reachable at http://${host}:${port}/status${ttlLabel}`)
+    const ttlLabel =
+      autoStopInMs !== null
+        ? ` (auto-stop in ${Math.ceil(autoStopInMs / 1000)}s)`
+        : ''
+    console.log(`Relay already reachable at http://${host}:${port}/status${statusLabel}${ttlLabel}`)
     return
   }
 
@@ -91,6 +103,7 @@ async function startRelay() {
     pid: Number.parseInt(String(lockOwner?.pid || relayPid || ''), 10) || null,
     host,
     port,
+    ports: relayPorts,
     startedAt: Date.now(),
     autoStopMs,
     autoStopAt: autoStopMs > 0 ? Date.now() + autoStopMs : null,
@@ -101,6 +114,31 @@ async function startRelay() {
   const ttlLabel =
     autoStopMs > 0 ? ` (auto-stop in ${Math.ceil(autoStopMs / 1000)}s)` : ' (auto-stop disabled)'
   console.log(`Relay started in background at http://${host}:${port}/status${pidLabel}${ttlLabel}`)
+}
+
+async function updateRelayPorts() {
+  const action = String(args.action || '').trim().toLowerCase()
+  const requestedPorts = parsePortList(args.ports || args.port, [])
+
+  if (!action || !ALLOWED_PORT_ACTIONS.includes(action)) {
+    throw new Error(`Unknown ports action "${action}". Use --action add|remove`)
+  }
+  if (requestedPorts.length === 0) {
+    throw new Error('No valid --ports provided')
+  }
+
+  const response = await requestJson(`http://${host}:${port}/admin/ports`, statusTimeoutMs, {
+    method: 'POST',
+    body: {
+      action,
+      ports: requestedPorts,
+    },
+  })
+  if (response && response.ok === false) {
+    throw new Error(`Port update failed: ${response.error || 'unknown'}`)
+  }
+
+  console.log(JSON.stringify(response, null, 2))
 }
 
 async function stopRelay() {
@@ -135,7 +173,7 @@ async function stopRelay() {
 }
 
 async function printStatus() {
-  const status = await fetchRelayStatus(false)
+  const status = await fetchRelayStatus(false, { all: args.all === true })
   if (!status.ok) {
     console.log(JSON.stringify({ ok: false, reason: 'Relay not reachable', host, port }, null, 2))
     return
@@ -147,10 +185,15 @@ async function printStatus() {
     ok: true,
     host,
     port,
+    ports: Array.isArray(status.ports) ? status.ports : [],
     service: status.service,
-    extensionConnected: status.extensionConnected,
-    extensionLastSeenAgoMs: status.extensionLastSeenAgoMs,
-    queuedControllerCommands: status.queuedControllerCommands,
+    extensionConnected:
+      status.extensionConnected === true || (Array.isArray(status.extensionPorts) && status.extensionPorts.length > 0),
+    extensionPorts: status.extensionPorts || [],
+    extensionLastSeenAgoMs: Number.isFinite(status.extensionLastSeenAgoMs) ? status.extensionLastSeenAgoMs : null,
+    activePorts: Number.isFinite(status.activePorts) ? status.activePorts : (status.extensionPorts || []).length,
+    queuedControllerCommands:
+      Number.isFinite(status.queuedControllerCommands) ? status.queuedControllerCommands : 0,
     lockPid: lockOwner?.pid ?? null,
     managerPid: state?.pid ?? null,
     autoStopMs: Number.isInteger(state?.autoStopMs) ? state.autoStopMs : null,
@@ -164,7 +207,12 @@ async function printStatus() {
 function launchRelayProcess() {
   const logPath = getRelayLogPath(host, port)
   const logHandle = fs.openSync(logPath, 'a')
-  const relayArgs = [relayServerPath, '--host', host, '--port', String(port), '--timeout', String(timeoutMs)]
+  const relayArgs = [relayServerPath, '--host', host, '--timeout', String(timeoutMs)]
+  if (relayPorts.length === 1) {
+    relayArgs.push('--port', String(relayPorts[0]))
+  } else {
+    relayArgs.push('--ports', relayPorts.join(','))
+  }
   if (autoStopMs > 0) {
     relayArgs.push('--max-runtime-ms', String(autoStopMs))
   }
@@ -242,9 +290,10 @@ function waitFor(predicate, timeoutMs, intervalMs) {
   })
 }
 
-async function fetchRelayStatus(throwOnError = true) {
+async function fetchRelayStatus(throwOnError = true, options = {}) {
+  const query = options.all === true ? '?all=true' : ''
   try {
-    const response = await requestJson(`http://${host}:${port}/status`, statusTimeoutMs)
+    const response = await requestJson(`http://${host}:${port}/status${query}`, statusTimeoutMs)
     return {
       ok: true,
       ...(typeof response === 'object' && response ? response : {}),
@@ -255,16 +304,26 @@ async function fetchRelayStatus(throwOnError = true) {
   }
 }
 
-function requestJson(url, timeoutMs = 1000) {
+function requestJson(url, timeoutMs = 1000, reqOptions = {}) {
+  const method = String(reqOptions.method || 'GET').toUpperCase()
+  const bodyPayload = reqOptions.body
+  const bodyText = bodyPayload === undefined ? '' : JSON.stringify(bodyPayload)
   const target = new URL(url)
   return new Promise((resolve, reject) => {
-    const req = http.get(
+    const req = http.request(
       {
         protocol: 'http:',
         hostname: target.hostname,
         port: target.port,
-        path: target.pathname,
+        path: `${target.pathname}${target.search}`,
+        method,
         timeout: timeoutMs,
+        headers: bodyText
+          ? {
+              'content-type': 'application/json',
+              'content-length': Buffer.byteLength(bodyText),
+            }
+          : undefined,
       },
       (res) => {
         let body = ''
@@ -284,6 +343,8 @@ function requestJson(url, timeoutMs = 1000) {
         })
       },
     )
+    if (bodyText) req.write(bodyText)
+    req.end()
 
     req.on('error', (error) => {
       reject(error)
@@ -337,19 +398,19 @@ function readRelayState() {
   }
 }
 
-function getRelayStatePath(hostname, relayPort) {
+function getRelayStatePath(hostname) {
   const safeHost = String(hostname || DEFAULT_HOST).replace(/[^a-zA-Z0-9.-]/g, '_')
-  return path.join(os.tmpdir(), `${RELAY_FILE_PREFIX}-${safeHost}-${relayPort}.manager.json`)
+  return path.join(os.tmpdir(), `${RELAY_FILE_PREFIX}-${safeHost}.manager.json`)
 }
 
-function getRelayLogPath(hostname, relayPort) {
+function getRelayLogPath(hostname) {
   const safeHost = String(hostname || DEFAULT_HOST).replace(/[^a-zA-Z0-9.-]/g, '_')
-  return path.join(os.tmpdir(), `${RELAY_FILE_PREFIX}-${safeHost}-${relayPort}.log`)
+  return path.join(os.tmpdir(), `${RELAY_FILE_PREFIX}-${safeHost}.log`)
 }
 
-function getRelayLockPath(hostname, relayPort) {
+function getRelayLockPath(hostname) {
   const safeHost = String(hostname || DEFAULT_HOST).replace(/[^a-zA-Z0-9.-]/g, '_')
-  return path.join(os.tmpdir(), `${RELAY_FILE_PREFIX}-${safeHost}-${relayPort}.lock`)
+  return path.join(os.tmpdir(), `${RELAY_FILE_PREFIX}-${safeHost}.lock`)
 }
 
 function parsePositiveInt(value, fallback, label) {
@@ -376,6 +437,19 @@ function parsePort(value, fallback) {
   return parsed
 }
 
+function parsePortList(raw, fallback) {
+  if (raw == null || raw === '') return fallback.slice()
+  const tokens = String(raw).split(',')
+  const parsedPorts = []
+  for (const token of tokens) {
+    const candidate = Number.parseInt(String(token).trim(), 10)
+    if (!Number.isInteger(candidate) || candidate < 1 || candidate > 65535) continue
+    parsedPorts.push(candidate)
+  }
+  if (parsedPorts.length === 0) return fallback.slice()
+  return [...new Set(parsedPorts)].sort((a, b) => a - b)
+}
+
 function parseArgs(argv) {
   const out = { help: false }
   if (!argv[0]) return out
@@ -390,10 +464,13 @@ function parseArgs(argv) {
     if (arg === '--help' || arg === '-h') out.help = true
     else if (arg === '--host' && argv[i + 1]) out.host = argv[++i]
     else if (arg === '--port' && argv[i + 1]) out.port = argv[++i]
+    else if (arg === '--ports' && argv[i + 1]) out.ports = argv[++i]
     else if (arg === '--timeout' && argv[i + 1]) out.timeout = argv[++i]
     else if (arg === '--start-timeout-ms' && argv[i + 1]) out.startTimeoutMs = argv[++i]
+    else if (arg === '--action' && argv[i + 1]) out.action = argv[++i]
     else if (arg === '--status-timeout-ms' && argv[i + 1]) out.statusTimeoutMs = argv[++i]
     else if (arg === '--auto-stop-ms' && argv[i + 1]) out.autoStopMs = argv[++i]
+    else if (arg === '--all') out.all = true
   }
 
   return out
@@ -402,8 +479,9 @@ function parseArgs(argv) {
 function printUsage() {
   console.log(`Usage:
   Relay manager reads GRAIS_RELAY_HOST / GRAIS_RELAY_PORT by default.
-  node scripts/relay-manager.js start [--host ${DEFAULT_HOST}] [--port ${DEFAULT_PORT}] [--timeout 12000] [--status-timeout-ms 1200] [--start-timeout-ms 10000] [--auto-stop-ms 7200000]
-  node scripts/relay-manager.js status [--host ${DEFAULT_HOST}] [--port ${DEFAULT_PORT}] [--status-timeout-ms 1200]
+  node scripts/relay-manager.js start [--host ${DEFAULT_HOST}] [--port ${DEFAULT_PORT}] [--ports ${DEFAULT_PORT},18794] [--timeout 12000] [--status-timeout-ms 1200] [--start-timeout-ms 10000] [--auto-stop-ms 7200000]
+  node scripts/relay-manager.js status [--host ${DEFAULT_HOST}] [--port ${DEFAULT_PORT}] [--ports ${DEFAULT_PORT},18794] [--status-timeout-ms 1200] [--all]
+  node scripts/relay-manager.js ports [--host ${DEFAULT_HOST}] --action add|remove --ports ${DEFAULT_PORT},18794 [--status-timeout-ms 1200]
   node scripts/relay-manager.js stop [--host ${DEFAULT_HOST}] [--port ${DEFAULT_PORT}] [--status-timeout-ms 1200]
 `)
 }

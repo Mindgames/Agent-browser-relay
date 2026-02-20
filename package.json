@@ -13,7 +13,9 @@
     "start:relay": "node relay-server.js",
     "relay:start": "node scripts/relay-manager.js start",
     "relay:status": "node scripts/relay-manager.js status",
-    "relay:stop": "node scripts/relay-manager.js stop"
+    "relay:stop": "node scripts/relay-manager.js stop",
+    "codex:install": "bash scripts/codex-skill-link.sh",
+    "codex:install:check": "bash scripts/codex-skill-link.sh --check"
   },
   "dependencies": {
     "ws": "^8.18.2"
