@@ -33,6 +33,16 @@ Use this skill to attach to a chosen Chrome tab through the bundled Grais Debugg
 
    Agent requirement: after `relay:start`, pause and ask the human to do this attach step, then wait for confirmation before continuing.
 
+   If your `.codex` skill folder drops `extension/` after a `git fetch` or pull, repair it from the repo:
+
+   ```bash
+   cd ~/.codex/skills/private/grais-tab-webdata-reader
+   git sparse-checkout disable
+   git config --unset-all core.sparseCheckout || true
+   git config --unset-all core.sparseCheckoutCone || true
+   git checkout -- .
+   ```
+
 4. Check readiness and attach state
 
    ```bash

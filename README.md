@@ -26,6 +26,18 @@ cd skills/private/grais-tab-webdata-reader
 npm install
 ```
 
+If pulls/fetches into this folder ever make `extension/` disappear, the repo has entered sparse mode.
+
+```bash
+cd ~/.codex/skills/private/grais-tab-webdata-reader
+git sparse-checkout disable
+git config --unset-all core.sparseCheckout || true
+git config --unset-all core.sparseCheckoutCone || true
+git checkout -- .
+```
+
+This should instantly restore `extension`, `scripts`, and all other tracked folders in the local `.codex` copy.
+
 ## 2) One-time Chrome setup
 1. Load extension in Chrome:
    - Open `chrome://extensions`

@@ -36,9 +36,21 @@ This repository provides a local browser-relay so Grais can attach to a **chosen
    Override when needed:
 
    ```bash
-   node scripts/relay-manager.js start --auto-stop-ms 10800000
-   node scripts/relay-manager.js start --auto-stop-ms 0
-   ```
+  node scripts/relay-manager.js start --auto-stop-ms 10800000
+  node scripts/relay-manager.js start --auto-stop-ms 0
+  ```
+
+If the `.codex` working tree ever loses subfolders after fetch/reset operations (for example `extension/`), run:
+
+```bash
+cd ~/.codex/skills/private/grais-tab-webdata-reader
+git sparse-checkout disable
+git config --unset-all core.sparseCheckout || true
+git config --unset-all core.sparseCheckoutCone || true
+git checkout -- .
+```
+
+This refreshes sparse state and restores all missing tracked directories in the skill copy.
 
 4. Keep relay running continuously while using the extension and only stop when finished:
 
