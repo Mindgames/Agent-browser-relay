@@ -57,6 +57,12 @@ npm install
 npm run relay:start -- --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "${GRAIS_RELAY_PORT:-18793}" --status-timeout-ms 3000
 ```
 
+To start multiple listeners in one relay process:
+
+```bash
+npm run relay:start -- --ports 18793,18794 --status-timeout-ms 3000
+```
+
 2. Confirm relay is up:
 
 ```bash
@@ -64,6 +70,7 @@ npm run relay:status -- --status-timeout-ms 3000
 ```
 
 Expected:
+- `ports`: when multiple listeners are configured, includes each configured port with `extensionConnected`, `activeTab`, and `attachedTabs`.
 - `ok: true`
 - `extensionConnected: true` after you complete the attach step below
 
@@ -152,6 +159,19 @@ npm run relay:status -- --status-timeout-ms 3000
   - Click extension icon again
   - Re-run `npm run relay:status -- --status-timeout-ms 3000`
   - Re-run check command
+
+- See all active port status and attached tabs:
+
+```bash
+npm run relay:status -- --all --status-timeout-ms 3000
+```
+
+- Add or remove relay listeners without restarting:
+
+```bash
+node scripts/relay-manager.js ports --action add --ports 18795
+node scripts/relay-manager.js ports --action remove --ports 18794
+```
 
 - `Timed out waiting for Runtime.evaluate`:
   - Tab is usually not attached

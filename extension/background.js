@@ -43,6 +43,7 @@ let userAttachmentEnabled = false
 let userPinnedTabId = null
 
 let nextSession = 1
+let currentRelayPort = DEFAULT_PORT
 
 /** @type {Map<number, {state:'connecting'|'connected', sessionId?:string, targetId?:string, attachOrder?:number}>} */
 const tabs = new Map()
@@ -263,6 +264,7 @@ async function ensureRelayConnection() {
 
   relayConnectPromise = (async () => {
     const port = await getRelayPort()
+    currentRelayPort = port
     const httpBase = `http://127.0.0.1:${port}`
     const wsUrl = `ws://127.0.0.1:${port}/extension`
 
@@ -344,15 +346,14 @@ function startRelayHeartbeat() {
   stopRelayHeartbeat()
   if (!relayWs || relayWs.readyState !== WebSocket.OPEN) return
 
+  void sendRelayHeartbeat().catch((error) => {
+    dbg('relayHeartbeat.failed', { error: error instanceof Error ? error.message : String(error) })
+  })
+
   relayHeartbeatTimer = setInterval(() => {
-    try {
-      sendToRelay({
-        method: 'Grais.extensionHeartbeat',
-        ts: Date.now(),
-      })
-    } catch {
-      // Ignore; relay connection will be restarted by reconnection flow.
-    }
+    void sendRelayHeartbeat().catch((error) => {
+      dbg('relayHeartbeat.failed', { error: error instanceof Error ? error.message : String(error) })
+    })
   }, RELAY_HEARTBEAT_MS)
 }
 
@@ -360,6 +361,59 @@ function stopRelayHeartbeat() {
   if (!relayHeartbeatTimer) return
   clearInterval(relayHeartbeatTimer)
   relayHeartbeatTimer = null
+}
+
+async function sendRelayHeartbeat() {
+  if (!relayWs || relayWs.readyState !== WebSocket.OPEN) return
+  const payload = {
+    method: 'Grais.extensionHeartbeat',
+    ts: Date.now(),
+    relayPort: currentRelayPort,
+    state: userAttachmentEnabled ? 'attached' : 'detached',
+    status: userAttachmentEnabled ? 'ON' : 'OFF',
+    activeTab: await buildActiveHeartbeatTab(),
+    attachedTabs: await buildAttachedHeartbeatTabs(),
+  }
+  sendToRelay(payload)
+}
+
+async function buildActiveHeartbeatTab() {
+  try {
+    const candidates = await chrome.tabs.query({ active: true, currentWindow: true })
+    const active = Array.isArray(candidates) && candidates.length > 0 ? candidates[0] : null
+    return sanitizeHeartbeatTab(active)
+  } catch {
+    return null
+  }
+}
+
+async function buildAttachedHeartbeatTabs() {
+  const entries = [...tabs.entries()].filter(([, tab]) => tab?.state === 'connected')
+  const attached = []
+  for (const [tabId, tab] of entries) {
+    const candidate = await chrome.tabs.get(tabId).catch(() => null)
+    const base = sanitizeHeartbeatTab(candidate)
+    if (!base) continue
+    attached.push({
+      ...base,
+      sessionId: typeof tab?.sessionId === 'string' ? tab.sessionId : null,
+      targetId: typeof tab?.targetId === 'string' ? tab.targetId : null,
+      state: tab?.state || 'connected',
+    })
+  }
+  return attached
+}
+
+function sanitizeHeartbeatTab(tab) {
+  if (!tab || typeof tab !== 'object') return null
+  const tabId = typeof tab.id === 'number' && Number.isInteger(tab.id) ? tab.id : null
+  if (!tabId) return null
+  return {
+    tabId,
+    url: typeof tab.url === 'string' ? tab.url : null,
+    title: typeof tab.title === 'string' ? tab.title : null,
+    windowId: typeof tab.windowId === 'number' && Number.isInteger(tab.windowId) ? tab.windowId : null,
+  }
 }
 
 function startRelayReconnectLoop() {
