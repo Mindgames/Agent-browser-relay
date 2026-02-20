@@ -5,8 +5,8 @@ const path = require('node:path')
 const http = require('node:http')
 const { spawn } = require('node:child_process')
 
-const DEFAULT_HOST = '127.0.0.1'
-const DEFAULT_PORT = 18793
+const DEFAULT_HOST = String(process.env.GRAIS_RELAY_HOST || '127.0.0.1').trim() || '127.0.0.1'
+const DEFAULT_PORT = parsePort(process.env.GRAIS_RELAY_PORT, 18793)
 const DEFAULT_TIMEOUT_MS = 12000
 const DEFAULT_START_TIMEOUT_MS = 10000
 const DEFAULT_START_POLL_MS = 250
@@ -27,7 +27,7 @@ if (!command) {
   process.exit(1)
 }
 
-const host = args.host || DEFAULT_HOST
+const host = String(args.host || DEFAULT_HOST).trim() || DEFAULT_HOST
 const port = parsePort(args.port, DEFAULT_PORT)
 const timeoutMs = parsePositiveInt(args.timeout, DEFAULT_TIMEOUT_MS, '--timeout')
 const startTimeoutMs = parsePositiveInt(args.startTimeoutMs, DEFAULT_START_TIMEOUT_MS, '--start-timeout-ms')
@@ -401,8 +401,9 @@ function parseArgs(argv) {
 
 function printUsage() {
   console.log(`Usage:
-  node scripts/relay-manager.js start [--host 127.0.0.1] [--port 18793] [--timeout 12000] [--status-timeout-ms 1200] [--start-timeout-ms 10000] [--auto-stop-ms 7200000]
-  node scripts/relay-manager.js status [--host 127.0.0.1] [--port 18793] [--status-timeout-ms 1200]
-  node scripts/relay-manager.js stop [--host 127.0.0.1] [--port 18793] [--status-timeout-ms 1200]
+  Relay manager reads GRAIS_RELAY_HOST / GRAIS_RELAY_PORT by default.
+  node scripts/relay-manager.js start [--host ${DEFAULT_HOST}] [--port ${DEFAULT_PORT}] [--timeout 12000] [--status-timeout-ms 1200] [--start-timeout-ms 10000] [--auto-stop-ms 7200000]
+  node scripts/relay-manager.js status [--host ${DEFAULT_HOST}] [--port ${DEFAULT_PORT}] [--status-timeout-ms 1200]
+  node scripts/relay-manager.js stop [--host ${DEFAULT_HOST}] [--port ${DEFAULT_PORT}] [--status-timeout-ms 1200]
 `)
 }

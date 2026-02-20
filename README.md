@@ -4,8 +4,16 @@ Use this project to let Grais read data from the **attached Chrome tab** through
 
 ## What runs where
 - Extension (`extension/background.js`): attaches/detaches a chosen tab.
-- Relay (`relay-server.js`): local bridge on `127.0.0.1:18793`.
+- Relay (`relay-server.js`): local bridge default host/port `127.0.0.1:18793`, configurable per run.
 - Reader (`scripts/read-active-tab.js`): executes reads and prints JSON.
+
+Set once per shell session if you run on a different endpoint:
+
+```bash
+export GRAIS_RELAY_HOST=127.0.0.1
+export GRAIS_RELAY_PORT=18793
+export GRAIS_ATTACH_TIMEOUT_MS=120000
+```
 
 ## 1) Clone and install
 From `~/.codex`, install into `skills/private`:
@@ -41,6 +49,13 @@ cd grais-tab-webdata-reader
 npm run relay:start -- --status-timeout-ms 3000
 ```
 
+Use explicit host/port if you are not on defaults:
+
+```bash
+cd grais-tab-webdata-reader
+npm run relay:start -- --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "${GRAIS_RELAY_PORT:-18793}" --status-timeout-ms 3000
+```
+
 2. Confirm relay is up:
 
 ```bash
@@ -60,7 +75,7 @@ Expected:
 4. Verify attach before any read:
 
 ```bash
-node scripts/read-active-tab.js --check --wait-for-attach --attach-timeout-ms 120000
+node scripts/read-active-tab.js --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "${GRAIS_RELAY_PORT:-18793}" --check --wait-for-attach --attach-timeout-ms "${GRAIS_ATTACH_TIMEOUT_MS:-120000}"
 ```
 
 Continue only when this command succeeds.
@@ -73,19 +88,21 @@ Note:
 Default structured payload (`url`, `title`, `text`, `links`, `metaDescription`):
 
 ```bash
-node scripts/read-active-tab.js --pretty false
+node scripts/read-active-tab.js --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "${GRAIS_RELAY_PORT:-18793}" --pretty false
 ```
 
 Full DOM:
 
 ```bash
-node scripts/read-active-tab.js --expression "document.documentElement.outerHTML" --pretty false
+node scripts/read-active-tab.js --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "${GRAIS_RELAY_PORT:-18793}" --expression "document.documentElement.outerHTML" --pretty false
 ```
 
 Screenshot (full page):
 
 ```bash
 node scripts/read-active-tab.js \
+  --host "${GRAIS_RELAY_HOST:-127.0.0.1}" \
+  --port "${GRAIS_RELAY_PORT:-18793}" \
   --screenshot \
   --screenshot-full-page \
   --screenshot-path "./tmp/page.png" \
@@ -96,6 +113,8 @@ WhatsApp messages:
 
 ```bash
 node scripts/read-active-tab.js \
+  --host "${GRAIS_RELAY_HOST:-127.0.0.1}" \
+  --port "${GRAIS_RELAY_PORT:-18793}" \
   --preset whatsapp-messages \
   --selector "#main [data-testid=\"conversation-panel-messages\"], #main" \
   --max-messages 200 \
@@ -138,12 +157,15 @@ npm run relay:status -- --status-timeout-ms 3000
   - Re-attach and re-run:
 
 ```bash
-node scripts/read-active-tab.js --check --wait-for-attach --attach-timeout-ms 120000
+node scripts/read-active-tab.js --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "${GRAIS_RELAY_PORT:-18793}" --check --wait-for-attach --attach-timeout-ms "${GRAIS_ATTACH_TIMEOUT_MS:-120000}"
 ```
 
 - Clean restart:
 
 ```bash
 npm run relay:stop
-npm run relay:start
+npm run relay:start -- --status-timeout-ms 3000
 ```
+
+Note: every successful read/check response contains:
+`source.relayHost`, `source.relayPort`, `source.relayStatusUrl`, and `source.relayWebSocketUrl` so humans can identify which relay endpoint is active.
