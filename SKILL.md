@@ -71,6 +71,7 @@ Use this skill to attach to a chosen Chrome tab through the bundled Grais Debugg
 
 - `scripts/read-active-tab.js` default extraction: `url`, `title`, `text`, `links`, `metaDescription`.
 - `Runtime.evaluate` expression mode with `--expression`.
+- Screenshot capture mode via `--screenshot` (optional `--screenshot-full-page`, `--screenshot-path`).
 - Preset extraction for WhatsApp and generic chat-auditing with regex filters.
 - Attach-state polling with `--check --wait-for-attach`.
 
@@ -85,6 +86,7 @@ Use this skill to attach to a chosen Chrome tab through the bundled Grais Debugg
 ```bash
 node scripts/read-active-tab.js --pretty false
 node scripts/read-active-tab.js --expression "document.documentElement.outerHTML"
+node scripts/read-active-tab.js --screenshot --screenshot-full-page --screenshot-path "./tmp/page.png"
 node scripts/read-active-tab.js --preset whatsapp-messages --max-messages 200 --selector "#main"
 node scripts/read-active-tab.js --preset chat-audit --selector "body" --message-regex ".*"
 ```

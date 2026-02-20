@@ -82,6 +82,16 @@ Full DOM:
 node scripts/read-active-tab.js --expression "document.documentElement.outerHTML" --pretty false
 ```
 
+Screenshot (full page):
+
+```bash
+node scripts/read-active-tab.js \
+  --screenshot \
+  --screenshot-full-page \
+  --screenshot-path "./tmp/page.png" \
+  --pretty false
+```
+
 WhatsApp messages:
 
 ```bash
