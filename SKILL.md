@@ -60,6 +60,12 @@ export GRAIS_ATTACH_TIMEOUT_MS=120000
 
    Continue only if this command returns success.
 
+### Per-tab relay port behavior
+- If you run one relay process with multiple ports, the extension can manage different relay ports per attached tab.
+- A tab with no saved relay-port mapping uses the global default (`GRAIS_RELAY_PORT`, default `18793`).
+- After a successful attach, the extension saves that tab’s mapped relay port and reuses it automatically.
+- Closed tabs have their mapping removed automatically.
+
 ## Mandatory behavior for agents
 - Use fixed commands from this repo. Do not try to "discover" alternate script names.
 - Canonical commands:
@@ -70,6 +76,7 @@ export GRAIS_ATTACH_TIMEOUT_MS=120000
 - For relay health checks, always use explicit timeouts to avoid hangs:
   - `npm run relay:status -- --status-timeout-ms 3000`
   - `curl --max-time 3 -sS "http://${GRAIS_RELAY_HOST:-127.0.0.1}:${GRAIS_RELAY_PORT:-18793}/status"`
+  - `npm run relay:status -- --all --status-timeout-ms 3000`
 - After `relay:start`, pause and ask the human to attach the target tab before any read.
 - Run `node scripts/read-active-tab.js --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "${GRAIS_RELAY_PORT:-18793}" --check --wait-for-attach --attach-timeout-ms "${GRAIS_ATTACH_TIMEOUT_MS:-120000}"` before reads and proceed only when it succeeds.
 - Do not stop/restart relay during the task unless the human requests it or recovery is explicitly required.

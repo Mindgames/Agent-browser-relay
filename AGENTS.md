@@ -35,10 +35,10 @@ export GRAIS_RELAY_PORT=18793
    - Enable Developer mode
    - Load unpacked and select `~/.codex/skills/private/grais-tab-webdata-reader/extension`
    - Pin Grais Debugger icon to the toolbar
+   - Run `npm install` once if this checkout has never installed dependencies.
 2. Start relay server:
 
    ```bash
-   npm install
    npm run relay:start
    ```
 
@@ -77,6 +77,13 @@ export GRAIS_RELAY_PORT=18793
    ```
 
    Continue only when this check succeeds.
+
+### Per-tab relay port behavior
+- If you start relay on multiple ports, one extension install can manage different ports by tab.
+- If a tab has no saved relay-port mapping, it uses the global default (`GRAIS_RELAY_PORT`, default `18793`).
+- On successful attach, the extension stores that tab’s relay port mapping.
+- Returning to that tab reuses the mapped port automatically.
+- Closing a tab clears its tab->port mapping.
 
 ## Agent execution contract (mandatory)
 - Use these exact scripts and command names. Do not search for alternatives and do not say they "may be named differently":
@@ -187,6 +194,11 @@ When check/read succeeds, payload includes:
 
 ```bash
 npm run relay:status -- --status-timeout-ms 3000
+```
+- To inspect mapped port activity across all listeners:
+
+```bash
+npm run relay:status -- --all --status-timeout-ms 3000
 ```
 - Single running relay instance is enforced by an OS lock; stale lock files are cleaned automatically.
 

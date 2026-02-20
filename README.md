@@ -40,12 +40,18 @@ npm run codex:install
    - Load unpacked from `~/.codex/skills/private/grais-tab-webdata-reader/extension`
    - Pin Grais Debugger icon
 
+### Per-tab relay port behavior
+You can run one relay process with multiple ports (`--ports`) and attach different tabs to different ports from the same extension install:
+- If a tab has not been attached before, it uses the global default port (`GRAIS_RELAY_PORT`, default `18793`).
+- After a successful attach, the extension stores that tab’s relay port and reuses it on future attaches.
+- This lets one extension instance survive with mixed ports per tab.
+- Tab-to-port mappings are cleared automatically when a tab is closed.
+
 ## 3) Start a session (always this order)
 1. Start relay:
 
 ```bash
 cd grais-debug-relay
-npm install
 npm run relay:start -- --status-timeout-ms 3000
 ```
 
@@ -53,7 +59,6 @@ Use explicit host/port if you are not on defaults:
 
 ```bash
 cd grais-debug-relay
-npm install
 npm run relay:start -- --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "${GRAIS_RELAY_PORT:-18793}" --status-timeout-ms 3000
 ```
 
@@ -69,7 +74,13 @@ npm run relay:start -- --ports 18793,18794 --status-timeout-ms 3000
 npm run relay:status -- --status-timeout-ms 3000
 ```
 
-Expected:
+To inspect all active ports/tabs:
+
+```bash
+npm run relay:status -- --all --status-timeout-ms 3000
+```
+
+Expected for multi-port:
 - `ports`: when multiple listeners are configured, includes each configured port with `extensionConnected`, `activeTab`, and `attachedTabs`.
 - `ok: true`
 - `extensionConnected: true` after you complete the attach step below
