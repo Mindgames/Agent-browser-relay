@@ -29,6 +29,8 @@ export GRAIS_RELAY_PORT=18793
 ```
 
 1. Install and open extension
+   - After checking out the repository, run `npm run codex:install` to map this copy into:
+     `~/.codex/skills/private/grais-tab-webdata-reader`
    - Chrome → `chrome://extensions`
    - Enable Developer mode
    - Load unpacked and select `~/.codex/skills/private/grais-tab-webdata-reader/extension`
@@ -36,7 +38,6 @@ export GRAIS_RELAY_PORT=18793
 2. Start relay server:
 
    ```bash
-   cd ~/.codex/skills/private/grais-tab-webdata-reader
    npm install
    npm run relay:start
    ```

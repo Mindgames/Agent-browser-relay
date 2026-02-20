@@ -16,29 +16,30 @@ export GRAIS_ATTACH_TIMEOUT_MS=120000
 ```
 
 ## 1) Clone and install
-From `~/.codex`, install into `skills/private`:
+From your preferred checkout location:
 
 ```bash
-cd ~/.codex
-git clone git@github.com:Replypilot/grais-debug-relay.git skills/private/grais-tab-webdata-reader
-cd skills/private/grais-tab-webdata-reader
+git clone git@github.com:Replypilot/grais-debug-relay.git
+cd grais-debug-relay
 npm install
+npm run codex:install
 ```
 
 If you use HTTPS:
 
 ```bash
-cd ~/.codex
-git clone https://github.com/Replypilot/grais-debug-relay.git skills/private/grais-tab-webdata-reader
-cd skills/private/grais-tab-webdata-reader
+git clone https://github.com/Replypilot/grais-debug-relay.git
+cd grais-debug-relay
 npm install
+npm run codex:install
 ```
 
 ## 2) One-time Chrome setup
 1. Load extension in Chrome:
    - Open `chrome://extensions`
    - Enable Developer mode
-   - Load unpacked from `<repo-root>/extension` (for example `.../grais-tab-webdata-reader/extension`)
+   - Run `npm run codex:install` once after checkout (or after moving the repo)
+   - Load unpacked from `~/.codex/skills/private/grais-tab-webdata-reader/extension`
    - Pin Grais Debugger icon
 
 ## 3) Start a session (always this order)

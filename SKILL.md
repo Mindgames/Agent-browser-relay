@@ -21,6 +21,7 @@ export GRAIS_ATTACH_TIMEOUT_MS=120000
 
    ```bash
    npm install
+   npm run codex:install
    npm run relay:start -- --status-timeout-ms 3000
    ```
 
@@ -37,17 +38,23 @@ export GRAIS_ATTACH_TIMEOUT_MS=120000
    node scripts/relay-manager.js start --auto-stop-ms 0
    ```
 
-2. Load extension from the `extension/` subfolder in Chrome
+2. Make the skill path canonical
+
+   ```bash
+   npm run codex:install
+   ```
+
+3. Load extension from the `extension/` subfolder in Chrome
 
    - `chrome://extensions`
    - Enable developer mode
    - Load unpacked from `~/.codex/skills/private/grais-tab-webdata-reader/extension`
 
-3. Attach the extension to the target tab (click toolbar icon)
+4. Attach the extension to the target tab (click toolbar icon)
 
    Agent requirement: after `relay:start`, pause and ask the human to do this attach step, then wait for confirmation before continuing.
 
-4. Check readiness and attach state
+5. Check readiness and attach state
 
    ```bash
    node scripts/read-active-tab.js --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "${GRAIS_RELAY_PORT:-18793}" --check --wait-for-attach --attach-timeout-ms "${GRAIS_ATTACH_TIMEOUT_MS:-120000}"
