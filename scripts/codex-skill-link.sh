@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 CANONICAL_ROOT="${HOME}/.codex/skills/private"
 CANONICAL_SKILL_PATH="${CANONICAL_ROOT}/grais-tab-webdata-reader"
 CANONICAL_EXTENSION_PATH="${CANONICAL_SKILL_PATH}/extension"
