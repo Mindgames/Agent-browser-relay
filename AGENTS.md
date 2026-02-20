@@ -20,6 +20,14 @@ This repository provides a local browser-relay so Grais can attach to a **chosen
   - WhatsApp extractor: `--message-regex`, `--exclude-message-regex`, `--sender-regex`, `--exclude-sender-regex`.
 
 ## Setup
+### Relay endpoint
+Default host/port is `127.0.0.1:18793`. If your relay is on a different port, set these env vars before any command:
+
+```bash
+export GRAIS_RELAY_HOST=127.0.0.1
+export GRAIS_RELAY_PORT=18793
+```
+
 1. Install and open extension
    - Chrome → `chrome://extensions`
    - Enable Developer mode
@@ -31,6 +39,14 @@ This repository provides a local browser-relay so Grais can attach to a **chosen
    cd ~/.codex/skills/private/grais-tab-webdata-reader
    npm install
    npm run relay:start
+   ```
+
+   If your relay is on another host/port:
+
+   ```bash
+   export GRAIS_RELAY_HOST=127.0.0.1
+   export GRAIS_RELAY_PORT=18793
+   npm run relay:start -- --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "${GRAIS_RELAY_PORT:-18793}"
    ```
 
 3. `relay:start` keeps relay running and auto-stops after 2 hours by default (to avoid start/stop churn).
@@ -56,7 +72,7 @@ This repository provides a local browser-relay so Grais can attach to a **chosen
    - Before any read, the agent must run:
 
    ```bash
-   node scripts/read-active-tab.js --check --wait-for-attach --attach-timeout-ms 120000
+   node scripts/read-active-tab.js --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "${GRAIS_RELAY_PORT:-18793}" --check --wait-for-attach --attach-timeout-ms 120000
    ```
 
    Continue only when this check succeeds.
@@ -68,14 +84,14 @@ This repository provides a local browser-relay so Grais can attach to a **chosen
   - `npm run relay:stop`
   - `node scripts/read-active-tab.js`
 - After `relay:start`, agent must stop and ask the human to attach the target tab, then wait for confirmation.
-- Agent must run `node scripts/read-active-tab.js --check --wait-for-attach --attach-timeout-ms 120000` before any data read and continue only on success.
+- Agent must run `node scripts/read-active-tab.js --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "${GRAIS_RELAY_PORT:-18793}" --check --wait-for-attach --attach-timeout-ms 120000` before any data read and continue only on success.
 - Agent must not stop/restart relay during a task unless the human explicitly asks for restart or a hard failure requires it.
 - If canonical scripts are missing, fail fast with a concrete error and stop; do not pivot to a different pipeline.
 
 Before running reads, also verify relay health:
 
 ```bash
-curl --max-time 3 -sS http://127.0.0.1:18793/status
+curl --max-time 3 -sS "http://${GRAIS_RELAY_HOST:-127.0.0.1}:${GRAIS_RELAY_PORT:-18793}/status"
 ```
 
 Expect `extensionConnected: true` and low queue depth before running fetches.
@@ -87,10 +103,10 @@ Never run bare `curl` without a timeout for relay checks.
 3. Validate readiness before each read:
 
    ```bash
-   node scripts/read-active-tab.js --check
+   node scripts/read-active-tab.js --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "${GRAIS_RELAY_PORT:-18793}" --check
    ```
    ```bash
-   node scripts/read-active-tab.js --check --wait-for-attach --attach-timeout-ms 120000
+   node scripts/read-active-tab.js --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "${GRAIS_RELAY_PORT:-18793}" --check --wait-for-attach --attach-timeout-ms 120000
    ```
 
    If relay is reachable this command waits for an active attachment instead of immediate failure.
@@ -98,7 +114,7 @@ Never run bare `curl` without a timeout for relay checks.
 4. Read default extraction from attached tab:
 
    ```bash
-   node scripts/read-active-tab.js --pretty false
+   node scripts/read-active-tab.js --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "${GRAIS_RELAY_PORT:-18793}" --pretty false
    ```
 
 5. Read full DOM:
@@ -108,10 +124,27 @@ Never run bare `curl` without a timeout for relay checks.
      --expression "document.documentElement.outerHTML" --pretty false
    ```
 
+   ```bash
+   node scripts/read-active-tab.js \
+     --host "${GRAIS_RELAY_HOST:-127.0.0.1}" \
+     --port "${GRAIS_RELAY_PORT:-18793}" \
+     --expression "document.documentElement.outerHTML" --pretty false
+   ```
+
 6. Capture a screenshot:
 
    ```bash
    node scripts/read-active-tab.js \
+     --screenshot \
+     --screenshot-full-page \
+     --screenshot-path "./tmp/page.png" \
+     --pretty false
+   ```
+
+   ```bash
+   node scripts/read-active-tab.js \
+     --host "${GRAIS_RELAY_HOST:-127.0.0.1}" \
+     --port "${GRAIS_RELAY_PORT:-18793}" \
      --screenshot \
      --screenshot-full-page \
      --screenshot-path "./tmp/page.png" \
@@ -128,9 +161,22 @@ Never run bare `curl` without a timeout for relay checks.
      --pretty false
    ```
 
+   ```bash
+   node scripts/read-active-tab.js \
+     --host "${GRAIS_RELAY_HOST:-127.0.0.1}" \
+     --port "${GRAIS_RELAY_PORT:-18793}" \
+     --preset whatsapp-messages \
+     --selector "#main [data-testid=\"conversation-panel-messages\"], #main" \
+     --max-messages 200 \
+     --pretty false
+   ```
+
 - `--wait-for-attach` waits for the bridge and tab attachment before running reads.
 - `--attach-timeout-ms <ms>` controls the max wait time (default: `120000`).
 - `--attach-poll-ms <ms>` controls retry frequency (default: `500`).
+
+When check/read succeeds, payload includes:
+`source.relayHost`, `source.relayPort`, `source.relayStatusUrl`, and `source.relayWebSocketUrl` so humans can confirm the active relay endpoint.
 
 ## Troubleshooting
 - Red `!` badge: relay is unreachable or extension cannot attach.

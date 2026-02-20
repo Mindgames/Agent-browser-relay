@@ -31,8 +31,10 @@ if (options.help) {
   process.exit(0)
 }
 
-const relayHost = options.host || DEFAULT_HOST
-const relayPort = parsePositiveInt(options.port, DEFAULT_PORT, 'port')
+const relayHost = String(options.host || process.env.GRAIS_RELAY_HOST || DEFAULT_HOST).trim() || DEFAULT_HOST
+const relayPort = parsePositiveInt(options.port || process.env.GRAIS_RELAY_PORT, DEFAULT_PORT, 'port')
+const relayStatusUrl = `http://${relayHost}:${relayPort}/status`
+const relayWebSocketUrl = `ws://${relayHost}:${relayPort}/extension`
 const timeoutMs = parsePositiveInt(options.timeout, DEFAULT_TIMEOUT_MS, 'timeout')
 const pretty = options.pretty !== false
 const selector = options.selector || 'body'
@@ -105,7 +107,7 @@ const expression =
     maxMessages,
   })
 
-const wsUrl = `ws://${relayHost}:${relayPort}/extension`
+const wsUrl = relayWebSocketUrl
 const socket = new WebSocket(wsUrl)
 
 const pending = new Map()
@@ -114,6 +116,15 @@ let nextId = 1
 
 let activeSocket = false
 let rejectAllPending
+
+function getRelaySource() {
+  return {
+    relayHost,
+    relayPort,
+    relayStatusUrl,
+    relayWebSocketUrl,
+  }
+}
 
 socket.addEventListener('open', () => {
   activeSocket = true
@@ -1218,7 +1229,7 @@ function requestJson(url, timeoutMs = DEFAULT_STATUS_TIMEOUT_MS) {
 
 async function getRelayStatus(throwOnError = true) {
   try {
-    const response = await requestJson(`http://${relayHost}:${relayPort}/status`, statusTimeoutMs)
+    const response = await requestJson(relayStatusUrl, statusTimeoutMs)
     return { ok: true, ...(typeof response === 'object' && response ? response : {}) }
   } catch (error) {
     if (throwOnError) {
@@ -1231,10 +1242,12 @@ async function getRelayStatus(throwOnError = true) {
 async function assertRelayConnectionReady() {
   const status = await getRelayStatus(false)
   if (!status.ok) {
-    throw new Error(`Relay status check failed: ${status.error || 'Relay not reachable'} at http://${relayHost}:${relayPort}/status`)
+    throw new Error(`Relay status check failed: ${status.error || 'Relay not reachable'} at ${relayStatusUrl}`)
   }
   if (!status.extensionConnected) {
-    throw new Error('Relay is reachable but extension is not connected. Open the target tab and click Grais Debugger.')
+    throw new Error(
+      `Relay is reachable (${relayStatusUrl}) but extension is not connected. Open the target tab and click Grais Debugger.`,
+    )
   }
 }
 
@@ -1273,36 +1286,70 @@ async function evaluateWithRecovery() {
 async function checkBridge() {
   const relay = {
     reachable: true,
+    extensionConnected: false,
     ping: false,
+    queueDepth: null,
+    extensionLastSeenAgoMs: null,
   }
   const extension = {
     connected: false,
     error: null,
   }
 
-  await sendRelayPing(timeoutMs)
-  relay.ping = true
-
   try {
-    const pingResult = await sendRelayCommand('Runtime.evaluate', {
-      expression: '1 + 1',
-      returnByValue: true,
-    })
-    if (!pingResult) throw new Error('No response from relay bridge')
-    extension.connected = true
+    const status = await getRelayStatus(false)
+    if (!status.ok) {
+      relay.reachable = false
+      throw new Error(`Relay status check failed: ${status.error || 'not reachable'}`)
+    }
+    relay.extensionConnected = Boolean(status.extensionConnected)
+    relay.extensionLastSeenAgoMs =
+      status.extensionLastSeenAgoMs === null || status.extensionLastSeenAgoMs === undefined ? null : Number(status.extensionLastSeenAgoMs)
+    relay.queueDepth = Number.isFinite(Number(status.queuedControllerCommands))
+      ? Number(status.queuedControllerCommands)
+      : null
+
+    if (!relay.extensionConnected) {
+      extension.error = 'Extension is not connected to relay.'
+      return {
+        ok: false,
+        relay,
+        extension,
+        source: getRelaySource(),
+      }
+    }
+
+    await sendRelayPing(timeoutMs)
+    relay.ping = true
+
+    try {
+      const attachResult = await sendRelayCommand('Grais.debugger.ensureActiveTab')
+      if (attachResult && attachResult.ok === false) {
+        throw new Error(attachResult.error || 'Active tab attachment is not ready')
+      }
+      extension.connected = true
+    } catch (ensureError) {
+      const pingResult = await sendRelayCommand('Runtime.evaluate', {
+        expression: '1 + 1',
+        returnByValue: true,
+      }).catch(() => null)
+
+      if (!pingResult) {
+        const fallbackMessage = ensureError instanceof Error ? ensureError.message : String(ensureError || 'No response from relay bridge')
+        extension.error = fallbackMessage
+      } else {
+        extension.connected = true
+      }
+    }
   } catch (error) {
     extension.error = error instanceof Error ? error.message : String(error)
-    extension.connected = false
   }
 
   return {
     ok: relay.ping && extension.connected,
     relay,
     extension,
-    source: {
-      relayHost,
-      relayPort,
-    },
+    source: getRelaySource(),
   }
 }
 
@@ -1360,22 +1407,25 @@ async function captureScreenshotWithRecovery(config) {
 async function waitForAttachmentReady(options = {}) {
   const timeoutMs = parseNonNegativeInt(options.timeoutMs, DEFAULT_ATTACH_TIMEOUT_MS, 'attach-timeout-ms')
   const pollMs = parsePositiveInt(options.pollMs, DEFAULT_ATTACH_POLL_MS, 'attach-poll-ms')
+  let lastFailure
 
   const start = Date.now()
   while (Date.now() - start < timeoutMs) {
     try {
       const status = await checkBridge()
       if (status.ok) return
+      lastFailure = status
     } catch {
-      // ignore
+      lastFailure = { error: 'checkBridge threw', relay: { statusUrl: relayStatusUrl } }
     }
     await sleep(pollMs)
   }
 
   throw new Error(
     [
-      `Timed out waiting for active tab attachment (${timeoutMs}ms).`,
+      `Timed out waiting for active tab attachment (${timeoutMs}ms) at ${relayStatusUrl}.`,
       'Keep the target tab active in Chrome and click the Grais Debugger icon to attach.',
+      ...(lastFailure ? [`Last observed check state: ${JSON.stringify(lastFailure)}`] : []),
     ].join(' '),
   )
 }
@@ -1428,10 +1478,7 @@ async function main() {
 
       const payload = {
         ok: true,
-        source: {
-          relayHost,
-          relayPort,
-        },
+        source: getRelaySource(),
         metadata,
       }
 
@@ -1465,10 +1512,7 @@ async function main() {
 
       const payload = {
         ok: true,
-        source: {
-          relayHost,
-          relayPort,
-        },
+        source: getRelaySource(),
         screenshot: {
           format: screenshotFormat,
           quality: screenshotQuality,
@@ -1505,10 +1549,7 @@ async function main() {
 
     const payload = {
       ok: true,
-      source: {
-        relayHost,
-        relayPort,
-      },
+      source: getRelaySource(),
       data: result.result?.value ?? null,
     }
 
