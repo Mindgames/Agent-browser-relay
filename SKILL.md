@@ -17,11 +17,15 @@ export GRAIS_RELAY_PORT=18793
 export GRAIS_ATTACH_TIMEOUT_MS=120000
 ```
 
-1. Install dependencies and start relay
+1. Wire canonical skill path
 
    ```bash
-   npm install
    npm run codex:install
+   ```
+
+2. Install dependencies and start relay
+
+   ```bash
    npm run relay:start -- --status-timeout-ms 3000
    ```
 
@@ -36,12 +40,6 @@ export GRAIS_ATTACH_TIMEOUT_MS=120000
    ```bash
    node scripts/relay-manager.js start --auto-stop-ms 10800000
    node scripts/relay-manager.js start --auto-stop-ms 0
-   ```
-
-2. Make the skill path canonical
-
-   ```bash
-   npm run codex:install
    ```
 
 3. Load extension from the `extension/` subfolder in Chrome

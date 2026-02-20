@@ -15,13 +15,12 @@ export GRAIS_RELAY_PORT=18793
 export GRAIS_ATTACH_TIMEOUT_MS=120000
 ```
 
-## 1) Clone and install
+## 1) Clone and wire skill path
 From your preferred checkout location:
 
 ```bash
 git clone git@github.com:Replypilot/grais-debug-relay.git
 cd grais-debug-relay
-npm install
 npm run codex:install
 ```
 
@@ -30,7 +29,6 @@ If you use HTTPS:
 ```bash
 git clone https://github.com/Replypilot/grais-debug-relay.git
 cd grais-debug-relay
-npm install
 npm run codex:install
 ```
 
@@ -46,14 +44,16 @@ npm run codex:install
 1. Start relay:
 
 ```bash
-cd grais-tab-webdata-reader
+cd grais-debug-relay
+npm install
 npm run relay:start -- --status-timeout-ms 3000
 ```
 
 Use explicit host/port if you are not on defaults:
 
 ```bash
-cd grais-tab-webdata-reader
+cd grais-debug-relay
+npm install
 npm run relay:start -- --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "${GRAIS_RELAY_PORT:-18793}" --status-timeout-ms 3000
 ```
 
