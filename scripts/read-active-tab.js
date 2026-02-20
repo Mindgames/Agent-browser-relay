@@ -2,8 +2,10 @@
 /* eslint-disable no-console */
 
 const http = require('node:http')
+const fs = require('node:fs')
+const path = require('node:path')
 
-const DEFAULT_PORT = 18792
+const DEFAULT_PORT = 18793
 const DEFAULT_HOST = '127.0.0.1'
 const DEFAULT_TIMEOUT_MS = 3000
 const DEFAULT_RETRIES = 2
@@ -11,6 +13,7 @@ const DEFAULT_RETRY_DELAY_MS = 400
 const DEFAULT_ATTACH_TIMEOUT_MS = 120000
 const DEFAULT_ATTACH_POLL_MS = 500
 const DEFAULT_STATUS_TIMEOUT_MS = 1200
+const DEFAULT_SCREENSHOT_TIMEOUT_MS = 15000
 
 const DEFAULT_MAX_LINKS = 20
 const DEFAULT_MAX_TEXT_CHARS = 8000
@@ -40,6 +43,13 @@ const retryDelayMs = parsePositiveInt(options.retryDelayMs, DEFAULT_RETRY_DELAY_
 const checkOnly = options.check === true
 const waitForAttach = options.waitForAttach === true
 const metadataOnly = options.metadata === true
+const screenshotOnly =
+  options.screenshot === true ||
+  options.screenshotPath !== undefined ||
+  options.screenshotFormat !== undefined ||
+  options.screenshotQuality !== undefined ||
+  options.screenshotFullPage === true ||
+  options.screenshotTimeoutMs !== undefined
 const attachTimeoutMs = parseNonNegativeInt(
   options.attachTimeoutMs,
   waitForAttach ? DEFAULT_ATTACH_TIMEOUT_MS : 0,
@@ -47,6 +57,16 @@ const attachTimeoutMs = parseNonNegativeInt(
 )
 const attachPollMs = parsePositiveInt(options.attachPollMs, DEFAULT_ATTACH_POLL_MS, 'attach-poll-ms')
 const statusTimeoutMs = parsePositiveInt(options.statusTimeoutMs, DEFAULT_STATUS_TIMEOUT_MS, 'status-timeout-ms')
+const screenshotPath = typeof options.screenshotPath === 'string' ? options.screenshotPath.trim() : ''
+const screenshotOutputPath = screenshotPath.length > 0 ? screenshotPath : null
+const screenshotFormat = resolveScreenshotFormat(options.screenshotFormat, screenshotOutputPath)
+const screenshotQuality = parseScreenshotQuality(options.screenshotQuality, screenshotFormat)
+const screenshotFullPage = options.screenshotFullPage === true
+const screenshotTimeoutMs = parsePositiveInt(
+  options.screenshotTimeoutMs,
+  DEFAULT_SCREENSHOT_TIMEOUT_MS,
+  'screenshot-timeout-ms',
+)
 const preset = String(options.preset || DEFAULT_PRESET).trim().toLowerCase()
 
 const textRegex = parseRegexOption('text-regex', options.textRegex, options.textRegexFlags)
@@ -155,6 +175,12 @@ function parseArgs(argv) {
     else if (arg === '--attach-timeout-ms' && argv[i + 1]) out.attachTimeoutMs = argv[++i]
     else if (arg === '--attach-poll-ms' && argv[i + 1]) out.attachPollMs = argv[++i]
     else if (arg === '--metadata') out.metadata = true
+    else if (arg === '--screenshot') out.screenshot = true
+    else if (arg === '--screenshot-path' && argv[i + 1]) out.screenshotPath = argv[++i]
+    else if (arg === '--screenshot-format' && argv[i + 1]) out.screenshotFormat = argv[++i]
+    else if (arg === '--screenshot-quality' && argv[i + 1]) out.screenshotQuality = argv[++i]
+    else if (arg === '--screenshot-timeout-ms' && argv[i + 1]) out.screenshotTimeoutMs = argv[++i]
+    else if (arg === '--screenshot-full-page') out.screenshotFullPage = true
 
     else if (arg === '--text-regex' && argv[i + 1]) out.textRegex = argv[++i]
     else if (arg === '--text-regex-flags' && argv[i + 1]) out.textRegexFlags = argv[++i]
@@ -208,6 +234,41 @@ function parseRegexOption(label, pattern, flags) {
     throw new Error(`Invalid ${label}: ${error instanceof Error ? error.message : String(error)}`)
   }
   return { pattern, flags: safeFlags }
+}
+
+function parseScreenshotFormat(value) {
+  const normalized = String(value || '').trim().toLowerCase()
+  if (!normalized) return 'png'
+  if (normalized === 'jpg') return 'jpeg'
+  if (normalized === 'png' || normalized === 'jpeg' || normalized === 'webp') return normalized
+  throw new Error(`Invalid screenshot-format: ${String(value)} (must be png|jpeg|webp)`)
+}
+
+function inferScreenshotFormatFromPath(filePath) {
+  if (!filePath) return null
+  const ext = path.extname(String(filePath)).trim().toLowerCase()
+  if (ext === '.png') return 'png'
+  if (ext === '.jpg' || ext === '.jpeg') return 'jpeg'
+  if (ext === '.webp') return 'webp'
+  return null
+}
+
+function resolveScreenshotFormat(explicitFormat, outputPath) {
+  if (explicitFormat !== undefined) return parseScreenshotFormat(explicitFormat)
+  const inferred = inferScreenshotFormatFromPath(outputPath)
+  return inferred || 'png'
+}
+
+function parseScreenshotQuality(value, format) {
+  if (value === undefined) return null
+  if (format !== 'jpeg' && format !== 'webp') {
+    throw new Error('screenshot-quality can only be used with screenshot-format jpeg or webp')
+  }
+  const parsed = Number.parseInt(String(value), 10)
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 100) {
+    throw new Error(`Invalid screenshot-quality: ${String(value)} (must be 0-100)`)
+  }
+  return parsed
 }
 
 function buildBridgeExpression(config) {
@@ -1223,12 +1284,6 @@ async function checkBridge() {
   relay.ping = true
 
   try {
-    await sendRelayCommand('Grais.debugger.ensureActiveTab')
-  } catch {
-    // Compatibility: older extension versions may not expose this command.
-  }
-
-  try {
     const pingResult = await sendRelayCommand('Runtime.evaluate', {
       expression: '1 + 1',
       returnByValue: true,
@@ -1249,6 +1304,57 @@ async function checkBridge() {
       relayPort,
     },
   }
+}
+
+async function captureScreenshotWithRecovery(config) {
+  let lastError
+  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+    try {
+      try {
+        await sendRelayCommand('Grais.debugger.ensureActiveTab')
+      } catch {
+        // Best effort for extension versions without this compatibility command.
+      }
+
+      const pingResult = await sendRelayCommand('Runtime.evaluate', {
+        expression: '1 + 1',
+        returnByValue: true,
+      })
+      if (!pingResult) throw new Error('No response from relay bridge')
+
+      const params = {
+        format: config.format,
+      }
+      if (config.quality !== null) {
+        params.quality = config.quality
+      }
+
+      if (config.fullPage) {
+        const metrics = await sendRelayCommand('Page.getLayoutMetrics', undefined, config.timeoutMs)
+        const contentSize = metrics?.cssContentSize || metrics?.contentSize
+        const width = Number(contentSize?.width)
+        const height = Number(contentSize?.height)
+        if (Number.isFinite(width) && width > 0 && Number.isFinite(height) && height > 0) {
+          params.captureBeyondViewport = true
+          params.clip = { x: 0, y: 0, width, height, scale: 1 }
+        }
+      }
+
+      const result = await sendRelayCommand('Page.captureScreenshot', params, config.timeoutMs)
+      if (!result || typeof result.data !== 'string' || result.data.length === 0) {
+        throw new Error('Screenshot capture returned no image data')
+      }
+      return result
+    } catch (error) {
+      lastError = error
+      if (attempt >= maxRetries || !isRecoverableRelayError(lastError)) {
+        throw lastError
+      }
+      await sleep(retryDelayMs)
+    }
+  }
+
+  throw lastError || new Error('Failed to capture screenshot after retries')
 }
 
 async function waitForAttachmentReady(options = {}) {
@@ -1290,6 +1396,13 @@ async function main() {
   }
 
   try {
+    if (checkOnly && (metadataOnly || screenshotOnly)) {
+      throw new Error('--check cannot be combined with --metadata or screenshot options')
+    }
+    if (metadataOnly && screenshotOnly) {
+      throw new Error('--metadata cannot be combined with screenshot options')
+    }
+
     if (checkOnly) {
       if (waitForAttach && attachTimeoutMs > 0) {
         await waitForAttachmentReady({ timeoutMs: attachTimeoutMs, pollMs: attachPollMs })
@@ -1320,6 +1433,50 @@ async function main() {
           relayPort,
         },
         metadata,
+      }
+
+      const output = pretty ? JSON.stringify(payload, null, 2) : JSON.stringify(payload)
+      process.stdout.write(`${output}\n`)
+      return
+    }
+
+    if (screenshotOnly) {
+      if (waitForAttach && attachTimeoutMs > 0) {
+        await waitForAttachmentReady({ timeoutMs: attachTimeoutMs, pollMs: attachPollMs })
+      }
+
+      await assertRelayConnectionReady()
+
+      const result = await captureScreenshotWithRecovery({
+        format: screenshotFormat,
+        quality: screenshotQuality,
+        fullPage: screenshotFullPage,
+        timeoutMs: screenshotTimeoutMs,
+      })
+
+      const encoded = String(result.data || '')
+      const imageBuffer = Buffer.from(encoded, 'base64')
+      let resolvedOutputPath = null
+      if (screenshotOutputPath) {
+        resolvedOutputPath = path.resolve(screenshotOutputPath)
+        fs.mkdirSync(path.dirname(resolvedOutputPath), { recursive: true })
+        fs.writeFileSync(resolvedOutputPath, imageBuffer)
+      }
+
+      const payload = {
+        ok: true,
+        source: {
+          relayHost,
+          relayPort,
+        },
+        screenshot: {
+          format: screenshotFormat,
+          quality: screenshotQuality,
+          fullPage: screenshotFullPage,
+          bytes: imageBuffer.length,
+          path: resolvedOutputPath,
+          dataBase64: resolvedOutputPath ? null : encoded,
+        },
       }
 
       const output = pretty ? JSON.stringify(payload, null, 2) : JSON.stringify(payload)
@@ -1379,10 +1536,12 @@ function waitForSocket(ms) {
 
 function printUsage() {
   console.log(`Usage:
-  node read-active-tab.js [--host 127.0.0.1] [--port 18792] [--selector "body"] [--preset "default|whatsapp|whatsapp-messages|wa|chat-audit|chat"]
+  node read-active-tab.js [--host 127.0.0.1] [--port 18793] [--selector "body"] [--preset "default|whatsapp|whatsapp-messages|wa|chat-audit|chat"]
     [--wait-for-attach] [--attach-timeout-ms 120000] [--attach-poll-ms 500]
     [--status-timeout-ms 1200]
     [--metadata]
+    [--screenshot] [--screenshot-path "./out/page.png"] [--screenshot-format "png|jpeg|webp"]
+    [--screenshot-quality 80] [--screenshot-full-page] [--screenshot-timeout-ms 15000]
     [--text-regex "pattern"] [--text-regex-flags "i"] [--exclude-text-regex "pattern"] [--exclude-text-regex-flags "i"]
     [--message-regex "pattern"] [--message-regex-flags "i"] [--exclude-message-regex "pattern"] [--exclude-message-regex-flags "i"]
     [--sender-regex "pattern"] [--sender-regex-flags "i"] [--exclude-sender-regex "pattern"] [--exclude-sender-regex-flags "i"]
@@ -1394,6 +1553,9 @@ function printUsage() {
 
   --check: performs relay + extension handshake check only and exits.
   --metadata: fetches active tab URL/title metadata without forcing DOM attach.
+  --screenshot: capture a screenshot via CDP Page.captureScreenshot.
+  --screenshot-path: when set, writes the image file and returns its absolute path in JSON.
+  --screenshot-full-page: captures full page using Page.getLayoutMetrics.
 
 Regex controls apply to default and chat-audit extractors unless you pass --expression.
 
@@ -1419,6 +1581,8 @@ Examples:
   node read-active-tab.js --preset whatsapp-messages --message-regex "invoice|payment" --selector "#main"
   node read-active-tab.js --preset chat-audit --text-regex "hello|hey" --sender-regex "Mathias"
   node read-active-tab.js --link-text-regex "docs|help" --link-href-regex "grais"
+  node read-active-tab.js --screenshot --screenshot-path "./tmp/page.png"
+  node read-active-tab.js --screenshot --screenshot-full-page --screenshot-format jpeg --screenshot-quality 80 --screenshot-path "./tmp/page.jpg"
 `)
 }
 

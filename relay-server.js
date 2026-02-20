@@ -7,7 +7,7 @@ const os = require('node:os')
 const path = require('node:path')
 const { WebSocketServer } = require('ws')
 
-const DEFAULT_PORT = 18792
+const DEFAULT_PORT = 18793
 const DEFAULT_HOST = '127.0.0.1'
 const DEFAULT_TIMEOUT_MS = 12000
 const DEFAULT_MAX_RUNTIME_MS = 0
@@ -19,7 +19,7 @@ const MAX_QUEUED_CONTROLLER_COMMANDS = 16
 const args = parseArgs(process.argv.slice(2))
 if (args.help) {
   console.log(`Usage:
-  node relay-server.js [--host 127.0.0.1] [--port 18792] [--timeout 12000] [--max-runtime-ms 0]
+  node relay-server.js [--host 127.0.0.1] [--port 18793] [--timeout 12000] [--max-runtime-ms 0]
 
 Options:
   --host            Bind address (default: ${DEFAULT_HOST})

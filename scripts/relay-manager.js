@@ -6,10 +6,11 @@ const http = require('node:http')
 const { spawn } = require('node:child_process')
 
 const DEFAULT_HOST = '127.0.0.1'
-const DEFAULT_PORT = 18792
+const DEFAULT_PORT = 18793
 const DEFAULT_TIMEOUT_MS = 12000
 const DEFAULT_START_TIMEOUT_MS = 10000
 const DEFAULT_START_POLL_MS = 250
+const DEFAULT_STATUS_TIMEOUT_MS = 1200
 const DEFAULT_AUTO_STOP_MS = 2 * 60 * 60 * 1000
 const REPO_ROOT = path.resolve(__dirname, '..')
 const RELAY_FILE_PREFIX = 'grais-debugger-relay'
@@ -30,6 +31,11 @@ const host = args.host || DEFAULT_HOST
 const port = parsePort(args.port, DEFAULT_PORT)
 const timeoutMs = parsePositiveInt(args.timeout, DEFAULT_TIMEOUT_MS, '--timeout')
 const startTimeoutMs = parsePositiveInt(args.startTimeoutMs, DEFAULT_START_TIMEOUT_MS, '--start-timeout-ms')
+const statusTimeoutMs = parsePositiveInt(
+  args.statusTimeoutMs,
+  DEFAULT_STATUS_TIMEOUT_MS,
+  '--status-timeout-ms',
+)
 const autoStopMs = parseNonNegativeInt(args.autoStopMs, DEFAULT_AUTO_STOP_MS, '--auto-stop-ms')
 
 const relayServerPath = path.join(REPO_ROOT, 'relay-server.js')
@@ -238,7 +244,7 @@ function waitFor(predicate, timeoutMs, intervalMs) {
 
 async function fetchRelayStatus(throwOnError = true) {
   try {
-    const response = await requestJson(`http://${host}:${port}/status`)
+    const response = await requestJson(`http://${host}:${port}/status`, statusTimeoutMs)
     return {
       ok: true,
       ...(typeof response === 'object' && response ? response : {}),
@@ -386,6 +392,7 @@ function parseArgs(argv) {
     else if (arg === '--port' && argv[i + 1]) out.port = argv[++i]
     else if (arg === '--timeout' && argv[i + 1]) out.timeout = argv[++i]
     else if (arg === '--start-timeout-ms' && argv[i + 1]) out.startTimeoutMs = argv[++i]
+    else if (arg === '--status-timeout-ms' && argv[i + 1]) out.statusTimeoutMs = argv[++i]
     else if (arg === '--auto-stop-ms' && argv[i + 1]) out.autoStopMs = argv[++i]
   }
 
@@ -394,8 +401,8 @@ function parseArgs(argv) {
 
 function printUsage() {
   console.log(`Usage:
-  node scripts/relay-manager.js start [--host 127.0.0.1] [--port 18792] [--timeout 12000] [--start-timeout-ms 10000] [--auto-stop-ms 7200000]
-  node scripts/relay-manager.js status [--host 127.0.0.1] [--port 18792]
-  node scripts/relay-manager.js stop [--host 127.0.0.1] [--port 18792]
+  node scripts/relay-manager.js start [--host 127.0.0.1] [--port 18793] [--timeout 12000] [--status-timeout-ms 1200] [--start-timeout-ms 10000] [--auto-stop-ms 7200000]
+  node scripts/relay-manager.js status [--host 127.0.0.1] [--port 18793] [--status-timeout-ms 1200]
+  node scripts/relay-manager.js stop [--host 127.0.0.1] [--port 18793] [--status-timeout-ms 1200]
 `)
 }

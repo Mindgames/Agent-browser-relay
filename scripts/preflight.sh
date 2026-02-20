@@ -4,8 +4,8 @@ set -euo pipefail
 SKILL_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$SKILL_ROOT"
 
-echo "[preflight] checking relay status: http://127.0.0.1:18792/status"
-status="$(curl -sS http://127.0.0.1:18792/status || true)"
+echo "[preflight] checking relay status: http://127.0.0.1:18793/status"
+status="$(curl --max-time 3 -sS http://127.0.0.1:18793/status || true)"
 if [[ -z "$status" ]]; then
   echo "[preflight] FAIL: relay did not respond" >&2
   exit 1

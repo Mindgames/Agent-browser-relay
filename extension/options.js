@@ -1,4 +1,4 @@
-const DEFAULT_PORT = 18792
+const DEFAULT_PORT = 18793
 
 function clampPort(value) {
   const n = Number.parseInt(String(value || ''), 10)
