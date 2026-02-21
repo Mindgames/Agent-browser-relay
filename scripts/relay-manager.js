@@ -11,6 +11,7 @@ const DEFAULT_TIMEOUT_MS = 12000
 const DEFAULT_START_TIMEOUT_MS = 10000
 const DEFAULT_START_POLL_MS = 250
 const DEFAULT_AUTO_STOP_MS = 2 * 60 * 60 * 1000
+const DEFAULT_STATUS_TIMEOUT_MS = 1500
 const REPO_ROOT = path.resolve(__dirname, '..')
 const RELAY_FILE_PREFIX = 'grais-debugger-relay'
 
@@ -31,6 +32,7 @@ const port = parsePort(args.port, DEFAULT_PORT)
 const timeoutMs = parsePositiveInt(args.timeout, DEFAULT_TIMEOUT_MS, '--timeout')
 const startTimeoutMs = parsePositiveInt(args.startTimeoutMs, DEFAULT_START_TIMEOUT_MS, '--start-timeout-ms')
 const autoStopMs = parseNonNegativeInt(args.autoStopMs, DEFAULT_AUTO_STOP_MS, '--auto-stop-ms')
+const statusTimeoutMs = parsePositiveInt(args.statusTimeoutMs, DEFAULT_STATUS_TIMEOUT_MS, '--status-timeout-ms')
 
 const relayServerPath = path.join(REPO_ROOT, 'relay-server.js')
 const relayStatePath = getRelayStatePath(host, port)
@@ -129,6 +131,21 @@ async function stopRelay() {
 }
 
 async function printStatus() {
+  const scanPorts = parseStatusScanPorts(args.scanPorts)
+  if (scanPorts.length > 1) {
+    const entries = await Promise.all(scanPorts.map((scanPort) => collectPortStatus(host, scanPort)))
+    const summary = {
+      ok: true,
+      host,
+      scanMode: 'scan-ports',
+      ports: entries,
+      reachablePorts: entries.filter((entry) => entry.ok).length,
+      requestedPorts: entries.length,
+    }
+    console.log(JSON.stringify(summary, null, 2))
+    return
+  }
+
   const status = await fetchRelayStatus(false)
   if (!status.ok) {
     console.log(JSON.stringify({ ok: false, reason: 'Relay not reachable', host, port }, null, 2))
@@ -143,7 +160,10 @@ async function printStatus() {
     port,
     service: status.service,
     extensionConnected: status.extensionConnected,
+    attachedTabs: status.attachedTabs || [],
     extensionLastSeenAgoMs: status.extensionLastSeenAgoMs,
+    connectedControllerClients: status.connectedControllerClients,
+    pendingCommands: status.pendingCommands,
     queuedControllerCommands: status.queuedControllerCommands,
     lockPid: lockOwner?.pid ?? null,
     managerPid: state?.pid ?? null,
@@ -153,6 +173,44 @@ async function printStatus() {
       Number.isInteger(state?.autoStopAt) && state.autoStopAt > Date.now() ? state.autoStopAt - Date.now() : null,
   }
   console.log(JSON.stringify(payload, null, 2))
+}
+
+async function collectPortStatus(targetHost, targetPort, includeManagerState = true) {
+  const status = await fetchRelayStatus(false, targetHost, targetPort, statusTimeoutMs)
+  if (!status.ok) {
+    return {
+      ok: false,
+      host: targetHost,
+      port: targetPort,
+      error: status.error,
+    }
+  }
+
+  const lockOwner = readRelayLock(targetHost, targetPort)
+  const state = readRelayState(targetHost, targetPort)
+  const base = {
+    ok: true,
+    host: targetHost,
+    port: targetPort,
+    service: status.service,
+    extensionConnected: status.extensionConnected,
+    extensionLastSeenAgoMs: status.extensionLastSeenAgoMs,
+    queuedControllerCommands: status.queuedControllerCommands,
+    attachedTabs: status.attachedTabs || [],
+    connectedControllerClients: status.connectedControllerClients,
+    pendingCommands: status.pendingCommands,
+  }
+
+  if (!includeManagerState) return base
+  return {
+    ...base,
+    lockPid: lockOwner?.pid ?? null,
+    managerPid: state?.pid ?? null,
+    autoStopMs: Number.isInteger(state?.autoStopMs) ? state.autoStopMs : null,
+    autoStopAt: Number.isInteger(state?.autoStopAt) ? state.autoStopAt : null,
+    autoStopInMs:
+      Number.isInteger(state?.autoStopAt) && state.autoStopAt > Date.now() ? state.autoStopAt - Date.now() : null,
+  }
 }
 
 function launchRelayProcess() {
@@ -236,9 +294,9 @@ function waitFor(predicate, timeoutMs, intervalMs) {
   })
 }
 
-async function fetchRelayStatus(throwOnError = true) {
+async function fetchRelayStatus(throwOnError = true, targetHost = host, targetPort = port, timeoutMs = statusTimeoutMs) {
   try {
-    const response = await requestJson(`http://${host}:${port}/status`)
+    const response = await requestJson(`http://${targetHost}:${targetPort}/status`, timeoutMs)
     return {
       ok: true,
       ...(typeof response === 'object' && response ? response : {}),
@@ -301,15 +359,55 @@ function isNoSuchProcess(error) {
   return error && error.code === 'ESRCH'
 }
 
+function parseStatusScanPorts(rawValue) {
+  const value = String(rawValue || '').trim()
+  if (!value) return [port]
+
+  const parts = value.split(',').map((part) => part.trim()).filter(Boolean)
+  if (parts.length === 0) return [port]
+
+  const ports = new Set()
+  for (const part of parts) {
+    const range = part.split('-').map((value) => value.trim()).filter(Boolean)
+    if (range.length === 1) {
+      const parsed = parsePort(range[0], NaN)
+      if (!Number.isInteger(parsed)) {
+        throw new Error(`Invalid scan port: ${part}`)
+      }
+      ports.add(parsed)
+      continue
+    }
+
+    if (range.length !== 2) {
+      throw new Error(`Invalid scan port token: ${part}`)
+    }
+
+    const parsedStart = parsePort(range[0], NaN)
+    const parsedEnd = parsePort(range[1], NaN)
+    if (!Number.isInteger(parsedStart) || !Number.isInteger(parsedEnd)) {
+      throw new Error(`Invalid scan port range: ${part}`)
+    }
+
+    const rangeStart = Math.min(parsedStart, parsedEnd)
+    const rangeEnd = Math.max(parsedStart, parsedEnd)
+    for (let p = rangeStart; p <= rangeEnd; p += 1) {
+      ports.add(p)
+    }
+  }
+
+  return [...ports].sort((a, b) => a - b)
+}
+
 function sleep(ms) {
   return new Promise((resolve) => {
     setTimeout(resolve, ms)
   })
 }
 
-function readRelayLock() {
+function readRelayLock(targetHost = host, targetPort = port) {
+  const lockPath = getRelayLockPath(targetHost, targetPort)
   try {
-    const raw = fs.readFileSync(relayLockPath, 'utf8').trim()
+    const raw = fs.readFileSync(lockPath, 'utf8').trim()
     if (!raw) return null
     const parsed = JSON.parse(raw)
     const pid = Number.parseInt(String(parsed?.pid), 10)
@@ -319,9 +417,10 @@ function readRelayLock() {
   }
 }
 
-function readRelayState() {
+function readRelayState(targetHost = host, targetPort = port) {
+  const statePath = getRelayStatePath(targetHost, targetPort)
   try {
-    const raw = fs.readFileSync(relayStatePath, 'utf8')
+    const raw = fs.readFileSync(statePath, 'utf8')
     if (!raw) return null
     const parsed = JSON.parse(raw)
     const pid = Number.parseInt(String(parsed?.pid), 10)
@@ -387,6 +486,8 @@ function parseArgs(argv) {
     else if (arg === '--timeout' && argv[i + 1]) out.timeout = argv[++i]
     else if (arg === '--start-timeout-ms' && argv[i + 1]) out.startTimeoutMs = argv[++i]
     else if (arg === '--auto-stop-ms' && argv[i + 1]) out.autoStopMs = argv[++i]
+    else if (arg === '--status-timeout-ms' && argv[i + 1]) out.statusTimeoutMs = argv[++i]
+    else if (arg === '--scan-ports' && argv[i + 1]) out.scanPorts = argv[++i]
   }
 
   return out
@@ -395,7 +496,7 @@ function parseArgs(argv) {
 function printUsage() {
   console.log(`Usage:
   node scripts/relay-manager.js start [--host 127.0.0.1] [--port 18792] [--timeout 12000] [--start-timeout-ms 10000] [--auto-stop-ms 7200000]
-  node scripts/relay-manager.js status [--host 127.0.0.1] [--port 18792]
+  node scripts/relay-manager.js status [--host 127.0.0.1] [--port 18792] [--status-timeout-ms 1500] [--scan-ports 18792,18793,18802]
   node scripts/relay-manager.js stop [--host 127.0.0.1] [--port 18792]
 `)
 }

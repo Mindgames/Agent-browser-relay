@@ -3,11 +3,11 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Grais Debugger Browser Relay</title>
+    <title>Grais powertools</title>
     <style>
       :root {
         color-scheme: light dark;
-        --accent: #ff5a36;
+        --accent: #3b82f6;
         --panel: color-mix(in oklab, canvas 92%, canvasText 8%);
         --border: color-mix(in oklab, canvasText 18%, transparent);
         --muted: color-mix(in oklab, canvasText 70%, transparent);
@@ -154,12 +154,10 @@
   <body>
     <div class="wrap">
       <header>
-        <div class="logo" aria-hidden="true">
-          <img src="icons/icon128.png" alt="" />
-        </div>
+        <div class="logo" aria-hidden="true"></div>
         <div>
-          <h1>Grais Debugger Browser Relay</h1>
-          <p class="subtitle">Click the toolbar button on a tab to attach / detach.</p>
+          <h1>Grais powertools</h1>
+          <p class="subtitle">Grais debugger relay helpers and status.</p>
         </div>
       </header>
 
@@ -168,7 +166,7 @@
           <h2>Getting started</h2>
           <p>
             If you see a red <code>!</code> badge on the extension icon, the relay server is not reachable.
-            Start the Grais Debugger browser relay on this machine (Gateway or node host), then click the toolbar button again.
+            Start the Grais relay on this machine, open the target tab, then use the toolbar popup to attach.
           </p>
           <p>
             Full guide (install, remote Gateway, security): <a href="https://docs.gra.is/tools/chrome-extension" target="_blank" rel="noreferrer">docs.gra.is/tools/chrome-extension</a>
@@ -176,16 +174,7 @@
         </div>
 
         <div class="card">
-          <h2>Relay port</h2>
-          <label for="port">Port</label>
-          <div class="row">
-            <input id="port" inputmode="numeric" pattern="[0-9]*" />
-            <button id="save" type="button">Save</button>
-          </div>
-          <div class="hint">
-            Default: <code>18792</code>. Extension connects to: <code id="relay-url">http://127.0.0.1:&lt;port&gt;/</code>.
-            Only change this if your Grais Debugger profile uses a different <code>cdpUrl</code> port.
-          </div>
+          <h2>Relay status</h2>
           <div class="status" id="status"></div>
         </div>
       </div>

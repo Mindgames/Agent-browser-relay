@@ -63,9 +63,21 @@ Expected:
 - `ok: true`
 - `extensionConnected: true` after you complete the attach step below
 
+If you run multiple relays, use one scan call to see all ports + attached tabs:
+
+```bash
+npm run relay:status -- --scan-ports 18792,18793,18794,18795,18796,18797,18798,18799,18800,18801,18802
+```
+
+Sample fields:
+- `attachedTabs`: array of attached browser tabs (`tabId`, `title`, `url`, `targetId`)
+- `extensionConnected`: relay-side extension websocket state per port
+
 3. Human attach step (required for agent runs):
    - Open/focus target tab in Chrome
-   - Click Grais Debugger icon on that tab to attach it
+   - Click Grais Debugger icon to open the popup
+   - Optional: set a **Tab port** override for that tab if you use multiple relays
+   - Click **Attach this tab**
    - Confirm badge shows `ON`
    - Tell agent when done
 
@@ -79,7 +91,7 @@ Continue only when this command succeeds.
 
 Note:
 - Reads target the currently attached tab.
-- If attach state drifts (for example after reconnect/reload), click the icon on the intended tab and run the check command again.
+- If attach state drifts (for example after reconnect/reload), open the icon popup on the intended tab and click **Attach this tab**, then run the check command again.
 
 ## 4) Read data
 Default structured payload (`url`, `title`, `text`, `links`, `metaDescription`):
@@ -121,6 +133,11 @@ Notes:
 - `relay:start` auto-stops after 2 hours by default.
 - Override: `node scripts/relay-manager.js start --auto-stop-ms 10800000`
 - Disable auto-stop: `node scripts/relay-manager.js start --auto-stop-ms 0`
+- Multi-port scan check:
+
+```bash
+npm run relay:status -- --scan-ports 18792,18793,18794,18795,18796,18797,18798,18799,18800,18801,18802
+```
 
 ## 6) Troubleshooting
 - Relay unreachable:
@@ -131,7 +148,7 @@ npm run relay:status
 
 - Extension bridge disconnected (`extensionConnected: false`):
   - Re-focus target tab
-  - Click extension icon again
+  - Open extension popup on that tab and click **Attach this tab**
   - Re-run `npm run relay:status`
   - Re-run check command
 

@@ -43,6 +43,8 @@ let shuttingDown = false
 let extensionSocket = null
 /** @type {Set<any>} */
 const controllerSockets = new Set()
+/** @type {Map<number, {tabId:number, targetId:string|null, title:string|null, url:string|null, attachedAtMs:number, lastSeenAtMs:number}>} */
+const attachedTabsById = new Map()
 /** @type {Map<number, {socket: any, requestId: number, timer: NodeJS.Timeout}>} */
 const pendingByRelayId = new Map()
 /** @type {Array<{relayId: number, socket: any, requestId: number, payload: any, timer: NodeJS.Timeout}>} */
@@ -73,6 +75,7 @@ const httpServer = http.createServer((request, response) => {
               port,
               extensionConnected,
               extensionLastSeenAgoMs,
+              attachedTabs: getAttachedTabsSnapshot(),
               queuedControllerCommands: queuedControllerRequests.length,
               connectedControllerClients: controllerSockets.size,
               pendingCommands: pendingByRelayId.size,
@@ -142,6 +145,7 @@ wss.on('connection', (socket) => {
       if (state.role === 'extension') {
         state.seenAtMs = Date.now()
         extensionLastSeenTs = state.seenAtMs
+        attachedTabsById.clear()
         if (extensionSocket && extensionSocket !== socket && extensionSocket.readyState === extensionSocket.OPEN) {
           extensionSocket.close(1008, 'new_extension_client')
         }
@@ -165,6 +169,7 @@ wss.on('connection', (socket) => {
     if (extensionSocket === socket) {
       extensionSocket = null
       extensionLastSeenTs = 0
+      attachedTabsById.clear()
       stopRelayHeartbeatWatchdog()
       notifyControllers({ method: 'relayEvent', params: { type: 'extension_disconnected' } })
     }
@@ -201,6 +206,11 @@ function onExtensionMessage(msg, socket) {
   }
 
   if (msg && msg.method === 'Grais.extensionHeartbeat') {
+    return
+  }
+
+  if (msg && msg.method === 'Grais.extensionTabState') {
+    handleExtensionTabState(msg.params)
     return
   }
 
@@ -489,6 +499,51 @@ function sendToExtension(payload) {
   extensionSocket.send(JSON.stringify(payload))
 }
 
+function handleExtensionTabState(params) {
+  if (!params || typeof params !== 'object') return
+
+  const event = String(params.event || '').toLowerCase()
+  const rawTabId = Number.parseInt(String(params.tabId || ''), 10)
+  if (!Number.isInteger(rawTabId)) return
+
+  if (event === 'detached' || event === 'removed' || event === 'cleared') {
+    attachedTabsById.delete(rawTabId)
+    return
+  }
+
+  if (event !== 'attached') return
+
+  const tabId = rawTabId
+  const targetId = typeof params.targetId === 'string' && params.targetId.trim() ? params.targetId.trim() : null
+  const title = typeof params.title === 'string' && params.title.trim() ? params.title.trim() : null
+  const rawUrl = typeof params.url === 'string' && params.url.trim() ? params.url.trim() : null
+  const current = attachedTabsById.get(tabId)
+  const now = Date.now()
+
+  attachedTabsById.set(tabId, {
+    tabId,
+    targetId,
+    title,
+    url: rawUrl,
+    attachedAtMs: current?.attachedAtMs || now,
+    lastSeenAtMs: now,
+  })
+}
+
+function getAttachedTabsSnapshot() {
+  const snapshot = [...attachedTabsById.values()].map((entry) => ({
+    tabId: entry.tabId,
+    targetId: entry.targetId,
+    title: entry.title,
+    url: entry.url,
+    attachedAtMs: entry.attachedAtMs,
+    lastSeenAtMs: entry.lastSeenAtMs,
+  }))
+
+  snapshot.sort((a, b) => a.tabId - b.tabId)
+  return snapshot
+}
+
 function failPending(socket, reason) {
   for (const [relayId, pending] of pendingByRelayId) {
     if (!socket || pending.socket === socket) {
@@ -524,6 +579,7 @@ function isExtensionMessage(msg) {
   if (typeof msg !== 'object' || msg === null) return false
   if (msg && msg.method === 'forwardCDPEvent') return true
   if (msg && msg.method === 'Grais.extensionHeartbeat') return true
+  if (msg && msg.method === 'Grais.extensionTabState') return true
   if (msg && typeof msg.id === 'number' && (msg.result !== undefined || msg.error !== undefined)) return true
   return false
 }

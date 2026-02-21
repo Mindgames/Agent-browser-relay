@@ -29,7 +29,9 @@ Use this skill to attach to a chosen Chrome tab through the bundled Grais Debugg
    - Enable developer mode
    - Load unpacked from `~/.codex/skills/private/grais-tab-webdata-reader/extension`
 
-3. Attach the extension to the target tab (click toolbar icon)
+3. Attach the extension to the target tab (open toolbar popup and click attach)
+
+   Optional per-tab relay: in the popup, set **Tab port** before clicking attach if this tab should use a non-default relay port.
 
    Agent requirement: after `relay:start`, pause and ask the human to do this attach step, then wait for confirmation before continuing.
 
@@ -50,6 +52,12 @@ Use this skill to attach to a chosen Chrome tab through the bundled Grais Debugg
    ```
 
    Continue only if this command returns success.
+
+   For multi-relay deployments, verify all ports at once:
+
+   ```bash
+   npm run relay:status -- --scan-ports 18792,18793,18794,18795,18796,18797,18798,18799,18800,18801,18802
+   ```
 
 ## Mandatory behavior for agents
 - Use fixed commands from this repo. Do not try to "discover" alternate script names.
