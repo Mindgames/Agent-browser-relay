@@ -6,14 +6,21 @@
     "grais-debugger-relay": "relay-server.js"
   },
   "scripts": {
-    "lint": "node --check relay-server.js extension/background.js extension/options.js scripts/read-active-tab.js scripts/relay-manager.js",
+    "lint": "node --check relay-server.js extension/background.js extension/options.js scripts/read-active-tab.js scripts/relay-manager.js scripts/relay-service.js",
     "knip": "node -e \"console.log('knip: not configured for this repository; skipped')\"",
-    "build": "node --check relay-server.js extension/background.js extension/options.js scripts/read-active-tab.js scripts/relay-manager.js",
+    "build": "node --check relay-server.js extension/background.js extension/options.js scripts/read-active-tab.js scripts/relay-manager.js scripts/relay-service.js",
     "start": "node relay-server.js",
     "start:relay": "node relay-server.js",
     "relay:start": "node scripts/relay-manager.js start",
     "relay:status": "node scripts/relay-manager.js status",
     "relay:stop": "node scripts/relay-manager.js stop",
+    "relay:service:install": "node scripts/relay-service.js install",
+    "relay:service:uninstall": "node scripts/relay-service.js uninstall",
+    "relay:service:start": "node scripts/relay-service.js start",
+    "relay:service:stop": "node scripts/relay-service.js stop",
+    "relay:service:restart": "node scripts/relay-service.js restart",
+    "relay:service:update": "node scripts/relay-service.js restart",
+    "relay:service:status": "node scripts/relay-service.js status",
     "codex:install": "bash scripts/codex-skill-link.sh",
     "codex:install:check": "bash scripts/codex-skill-link.sh --check"
   },

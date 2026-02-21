@@ -60,6 +60,35 @@ You can run one relay process with multiple ports (`--ports`) and attach differe
 - Tab-to-port mappings are cleared automatically when a tab is closed.
 
 ## 3) Start a session (always this order)
+### Recommended: install as a global service (for multiple agents)
+For shared work across agents, keep one relay service running and never stop it manually until explicitly needed.
+
+```bash
+cd grais-debug-relay
+npm run relay:service:install -- --ports 18793 --timeout 12000 --max-runtime-ms 0
+```
+
+Useful lifecycle commands:
+
+```bash
+npm run relay:service:status
+npm run relay:service:stop
+npm run relay:service:start
+npm run relay:service:restart
+npm run relay:service:update
+npm run relay:service:uninstall
+```
+
+When relay code changes, update by restarting/reinstalling so the new binary is picked up by the managed service:
+
+```bash
+git pull
+npm run relay:service:update -- --wait-for-ready --ready-timeout-ms 10000
+```
+
+If you prefer one-off startup instead of service management, use the existing `relay:start` flow in the steps below.
+### Legacy one-off start
+
 1. Start relay:
 
 ```bash
