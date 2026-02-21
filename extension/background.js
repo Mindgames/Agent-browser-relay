@@ -1152,3 +1152,117 @@ chrome.runtime.onInstalled.addListener(() => {
   // Useful: first-time instructions.
   void chrome.runtime.openOptionsPage()
 })
+
+async function getPopupState(tabId, includeAllTabs = true) {
+  const requestedTabId = normalizeTabId(tabId)
+  const relayConnected = relayWs && relayWs.readyState === WebSocket.OPEN
+  const { defaultPort, tabPorts } = await getRelayPortConfig()
+
+  let activeTab = null
+  if (Number.isInteger(requestedTabId)) {
+    activeTab = await chrome.tabs.get(requestedTabId).catch(() => null)
+  }
+
+  const connectedTabs = []
+  const entries = includeAllTabs ? [...tabs.entries()] : requestedTabId ? [[requestedTabId, tabs.get(requestedTabId)]] : []
+  for (const [entryTabId, tabState] of entries) {
+    if (!tabState) continue
+    const tab = await chrome.tabs.get(entryTabId).catch(() => null)
+    const base = sanitizeHeartbeatTab(tab)
+    if (!base) continue
+    connectedTabs.push({
+      ...base,
+      state: tabState.state || 'unknown',
+      port: await getRelayPort(entryTabId),
+    })
+  }
+
+  const mappedPort = Number.isInteger(requestedTabId) ? parseRelayPort(tabPorts[requestedTabId], NaN) : NaN
+  const effectivePort = Number.isInteger(requestedTabId)
+    ? await getRelayPort(requestedTabId)
+    : defaultPort
+
+  return {
+    requestedTabId,
+    activeTab: activeTab
+      ? {
+          tabId: activeTab.id,
+          title: activeTab.title || null,
+          url: activeTab.url || null,
+          windowId: activeTab.windowId,
+        }
+      : null,
+    defaultPort,
+    relayPortConnected: relayConnected ? currentRelayPort : null,
+    mappedPort: Number.isInteger(mappedPort) ? mappedPort : null,
+    effectivePort: Number.isInteger(effectivePort) ? effectivePort : defaultPort,
+    userAttachmentEnabled,
+    activeTabState: requestedTabId && tabs.get(requestedTabId)?.state ? tabs.get(requestedTabId).state : null,
+    connectedTabs,
+  }
+}
+
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (!message || typeof message.type !== 'string' || !message.type.startsWith('grais.popup.')) {
+    return false
+  }
+
+  void (async () => {
+    try {
+      if (message.type === 'grais.popup.getState') {
+        const state = await getPopupState(message.tabId, Boolean(message.includeAllTabs))
+        sendResponse({ ok: true, ...state })
+        return
+      }
+
+      if (message.type === 'grais.popup.setTabPort') {
+        const tabId = normalizeTabId(message.tabId)
+        const port = parseRelayPort(message.port, NaN)
+        if (!Number.isInteger(tabId)) {
+          throw new Error('Invalid tab id')
+        }
+        if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+          throw new Error('Invalid relay port')
+        }
+        await setRelayPortForTab(tabId, port)
+        const state = await getPopupState(tabId, true)
+        sendResponse({ ok: true, ...state })
+        return
+      }
+
+      if (message.type === 'grais.popup.clearTabPort') {
+        const tabId = normalizeTabId(message.tabId)
+        if (!Number.isInteger(tabId)) {
+          throw new Error('Invalid tab id')
+        }
+        await clearRelayPortForTab(tabId)
+        const state = await getPopupState(tabId, true)
+        sendResponse({ ok: true, ...state })
+        return
+      }
+
+      if (message.type === 'grais.popup.toggleTabAttachment') {
+        const tabId = normalizeTabId(message.tabId)
+        if (!Number.isInteger(tabId)) {
+          throw new Error('Invalid tab id')
+        }
+        await connectOrToggleForActiveTab({ id: tabId })
+        const state = await getPopupState(tabId, true)
+        const wasAttached = Boolean(
+          userAttachmentEnabled &&
+            Number.isInteger(userPinnedTabId) &&
+            userPinnedTabId === tabId &&
+            state.activeTabState === 'connected',
+        )
+        sendResponse({ ok: true, attached: wasAttached, ...state })
+        return
+      }
+
+      sendResponse({ ok: false, error: `Unknown popup action: ${message.type}` })
+    } catch (error) {
+      sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) })
+    }
+  })()
+
+  return true
+})
