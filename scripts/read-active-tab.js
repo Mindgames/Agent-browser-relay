@@ -70,6 +70,7 @@ const screenshotTimeoutMs = parsePositiveInt(
   'screenshot-timeout-ms',
 )
 const preset = String(options.preset || DEFAULT_PRESET).trim().toLowerCase()
+const requestedTabId = parseOptionalTabId(options.tabId || process.env.GRAIS_TAB_ID, 'tab-id')
 
 const textRegex = parseRegexOption('text-regex', options.textRegex, options.textRegexFlags)
 const excludeTextRegex = parseRegexOption('exclude-text-regex', options.excludeTextRegex, options.excludeTextRegexFlags)
@@ -116,6 +117,8 @@ let nextId = 1
 
 let activeSocket = false
 let rejectAllPending
+let relaySessionId = null
+let leasedTabId = Number.isInteger(requestedTabId) ? requestedTabId : null
 
 function getRelaySource() {
   return {
@@ -123,6 +126,8 @@ function getRelaySource() {
     relayPort,
     relayStatusUrl,
     relayWebSocketUrl,
+    relaySessionId,
+    tabId: Number.isInteger(leasedTabId) ? leasedTabId : null,
   }
 }
 
@@ -181,6 +186,7 @@ function parseArgs(argv) {
     else if (arg === '--selector' && argv[i + 1]) out.selector = argv[++i]
     else if (arg === '--expression' && argv[i + 1]) out.expression = argv[++i]
     else if (arg === '--preset' && argv[i + 1]) out.preset = argv[++i]
+    else if (arg === '--tab-id' && argv[i + 1]) out.tabId = argv[++i]
     else if (arg === '--pretty' && argv[i + 1]) out.pretty = argv[++i] !== 'false'
     else if (arg === '--wait-for-attach') out.waitForAttach = true
     else if (arg === '--attach-timeout-ms' && argv[i + 1]) out.attachTimeoutMs = argv[++i]
@@ -232,6 +238,15 @@ function parseNonNegativeInt(value, fallback, label) {
   const parsed = Number.parseInt(String(value || fallback), 10)
   if (!Number.isFinite(parsed) || parsed < 0) {
     throw new Error(`Invalid ${label}: ${String(value)} (must be non-negative integer)`)
+  }
+  return parsed
+}
+
+function parseOptionalTabId(value, label = 'tab-id') {
+  if (value === undefined || value === null || String(value).trim() === '') return null
+  const parsed = Number.parseInt(String(value), 10)
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error(`Invalid ${label}: ${String(value)} (must be positive integer)`)
   }
   return parsed
 }
@@ -1119,7 +1134,7 @@ function defaultExpression(config) {
 `
 }
 
-function sendRelayCommand(method, params, timeout = timeoutMs) {
+function sendRelayRequest(method, params, timeout = timeoutMs) {
   return new Promise((resolve, reject) => {
     if (!activeSocket) {
       reject(new Error('Relay socket not open'))
@@ -1136,11 +1151,83 @@ function sendRelayCommand(method, params, timeout = timeoutMs) {
     socket.send(
       JSON.stringify({
         id,
-        method: 'forwardCDPCommand',
-        params: { method, params },
+        method,
+        ...(params !== undefined ? { params } : {}),
       }),
     )
   })
+}
+
+function sendRelayCommand(method, params, timeout = timeoutMs) {
+  const relayParams = {
+    method,
+    ...(params !== undefined ? { params } : {}),
+  }
+  if (relaySessionId) {
+    relayParams.relaySessionId = relaySessionId
+  }
+  if (Number.isInteger(leasedTabId)) {
+    relayParams.tabId = leasedTabId
+  }
+  return sendRelayRequest('forwardCDPCommand', relayParams, timeout)
+}
+
+async function ensureRelaySession() {
+  if (relaySessionId) return relaySessionId
+  const openResult = await sendRelayRequest('Grais.relay.openSession', {
+    client: 'read-active-tab',
+    ...(Number.isInteger(requestedTabId) ? { tabId: requestedTabId } : {}),
+  })
+  if (!openResult || openResult.ok === false || typeof openResult.sessionId !== 'string') {
+    throw new Error(openResult?.error || 'Failed to open relay session')
+  }
+  relaySessionId = openResult.sessionId
+  if (Number.isInteger(openResult.tabId)) {
+    leasedTabId = openResult.tabId
+  }
+  return relaySessionId
+}
+
+async function ensureRelayTabLease(tabId) {
+  const requested = parseOptionalTabId(tabId, 'tab-id')
+  if (!requested) return null
+  await ensureRelaySession()
+  const claimResult = await sendRelayRequest('Grais.relay.claimTab', {
+    sessionId: relaySessionId,
+    tabId: requested,
+  })
+  if (!claimResult || claimResult.ok === false) {
+    throw new Error(claimResult?.error || `Failed to claim tab lease for tab ${requested}`)
+  }
+  leasedTabId = requested
+  return requested
+}
+
+async function prepareTargetTabForCommand() {
+  if (Number.isInteger(requestedTabId)) {
+    await ensureRelayTabLease(requestedTabId)
+    const attachResult = await sendRelayCommand('Grais.debugger.attachTab', { tabId: requestedTabId })
+    if (attachResult && attachResult.ok === false) {
+      throw new Error(attachResult.error || `Failed to attach tab ${requestedTabId}`)
+    }
+    return
+  }
+  try {
+    await sendRelayCommand('Grais.debugger.ensureActiveTab')
+  } catch {
+    // Best effort for extension versions without this compatibility command.
+  }
+}
+
+async function closeRelaySession() {
+  if (!relaySessionId) return
+  try {
+    await sendRelayRequest('Grais.relay.closeSession', {
+      sessionId: relaySessionId,
+    }).catch(() => null)
+  } finally {
+    relaySessionId = null
+  }
 }
 
 function sendRelayPing(timeout = timeoutMs) {
@@ -1337,11 +1424,7 @@ async function evaluateWithRecovery() {
   let lastError
   for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
     try {
-      try {
-        await sendRelayCommand('Grais.debugger.ensureActiveTab')
-      } catch {
-        // Best effort for extension versions without this compatibility command.
-      }
+      await prepareTargetTabForCommand()
 
       const pingResult = await sendRelayCommand('Runtime.evaluate', {
         expression: '1 + 1',
@@ -1413,12 +1496,43 @@ async function checkBridge() {
     relay.ping = true
 
     try {
-      const attachResult = await sendRelayCommand('Grais.debugger.ensureActiveTab')
-      if (attachResult && attachResult.ok === false) {
-        throw new Error(attachResult.error || 'Active tab attachment is not ready')
+      if (Number.isInteger(requestedTabId)) {
+        await ensureRelayTabLease(requestedTabId)
+        const attachResult = await sendRelayCommand('Grais.debugger.attachTab', { tabId: requestedTabId })
+        if (attachResult && attachResult.ok === false) {
+          throw new Error(attachResult.error || `Tab ${requestedTabId} attachment is not ready`)
+        }
+      } else {
+        const attachResult = await sendRelayCommand('Grais.debugger.ensureActiveTab')
+        if (attachResult && attachResult.ok === false) {
+          throw new Error(attachResult.error || 'Active tab attachment is not ready')
+        }
+      }
+
+      const pingResult = await sendRelayCommand('Runtime.evaluate', {
+        expression: '1 + 1',
+        returnByValue: true,
+      }).catch(() => null)
+
+      if (!pingResult) {
+        throw new Error(
+          Number.isInteger(requestedTabId)
+            ? `No response from tab ${requestedTabId} through relay bridge`
+            : 'No response from relay bridge',
+        )
       }
       extension.connected = true
     } catch (ensureError) {
+      if (Number.isInteger(requestedTabId)) {
+        extension.error = ensureError instanceof Error ? ensureError.message : String(ensureError || 'Tab attachment failed')
+        return {
+          ok: false,
+          relay,
+          extension,
+          source: getRelaySource(),
+        }
+      }
+
       const pingResult = await sendRelayCommand('Runtime.evaluate', {
         expression: '1 + 1',
         returnByValue: true,
@@ -1447,11 +1561,7 @@ async function captureScreenshotWithRecovery(config) {
   let lastError
   for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
     try {
-      try {
-        await sendRelayCommand('Grais.debugger.ensureActiveTab')
-      } catch {
-        // Best effort for extension versions without this compatibility command.
-      }
+      await prepareTargetTabForCommand()
 
       const pingResult = await sendRelayCommand('Runtime.evaluate', {
         expression: '1 + 1',
@@ -1564,6 +1674,7 @@ async function main() {
       }
 
       await assertRelayConnectionReady()
+      await prepareTargetTabForCommand()
 
       const metadata = await sendRelayCommand('Grais.debugger.getActiveTabMetadata')
       if (!metadata || metadata.error) {
@@ -1653,6 +1764,7 @@ async function main() {
     console.error(error instanceof Error ? error.message : String(error))
     process.exit(1)
   } finally {
+    await closeRelaySession().catch(() => {})
     socket.close()
   }
 }
@@ -1672,6 +1784,7 @@ function waitForSocket(ms) {
 function printUsage() {
   console.log(`Usage:
   node read-active-tab.js [--host 127.0.0.1] [--port 18793] [--selector "body"] [--preset "default|whatsapp|whatsapp-messages|wa|chat-audit|chat"]
+    [--tab-id 123]
     [--wait-for-attach] [--attach-timeout-ms 120000] [--attach-poll-ms 500]
     [--status-timeout-ms 1200]
     [--metadata]
@@ -1687,6 +1800,7 @@ function printUsage() {
     [--retries 2] [--retry-delay-ms 400]
 
   --check: performs relay + extension handshake check only and exits.
+  --tab-id: binds this run to a specific Chrome tab id using a relay session lease.
   --metadata: fetches active tab URL/title metadata without forcing DOM attach.
   --screenshot: capture a screenshot via CDP Page.captureScreenshot.
   --screenshot-path: when set, writes the image file and returns its absolute path in JSON.

@@ -16,6 +16,7 @@ const RELAY_HEARTBEAT_TIMEOUT_MS = 15000
 const RELAY_HEARTBEAT_INTERVAL_MS = 2500
 const MAX_QUEUED_CONTROLLER_COMMANDS = 16
 const ALLOWED_ADMIN_ACTIONS = ['add', 'remove']
+const SESSION_ID_PREFIX = 'relay-session'
 
 const args = parseArgs(process.argv.slice(2))
 if (args.help) {
@@ -95,6 +96,10 @@ function createPortState(relayPort) {
     nextRelayId: 1,
     extensionLastSeenTs: 0,
     extensionHeartbeatState: null,
+    extensionSessionToTab: new Map(),
+    sessionsById: new Map(),
+    tabLeases: new Map(),
+    nextSessionId: 1,
     relayHeartbeatWatchdog: null,
     httpServer: null,
     wss: null,
@@ -116,10 +121,13 @@ function summarizePortState(state) {
     queuedControllerCommands: state.queuedControllerRequests.length,
     connectedControllerClients: state.controllerSockets.size,
     pendingCommands: state.pendingByRelayId.size,
+    sessionCount: state.sessionsById.size,
+    leasedTabCount: state.tabLeases.size,
     activeTab: state.extensionHeartbeatState?.activeTab || null,
     attachedTabs: Array.isArray(state.extensionHeartbeatState?.attachedTabs)
       ? state.extensionHeartbeatState.attachedTabs
       : [],
+    tabLeases: summarizeTabLeases(state),
     lastHeartbeatTs: state.extensionHeartbeatState?.ts || null,
   }
 }
@@ -135,11 +143,23 @@ function getSinglePortStatus(state) {
     queuedControllerCommands: state.queuedControllerRequests.length,
     connectedControllerClients: state.controllerSockets.size,
     pendingCommands: state.pendingByRelayId.size,
+    sessionCount: state.sessionsById.size,
+    leasedTabCount: state.tabLeases.size,
     activeTab: state.extensionHeartbeatState?.activeTab || null,
     attachedTabs: Array.isArray(state.extensionHeartbeatState?.attachedTabs)
       ? state.extensionHeartbeatState.attachedTabs
       : [],
+    tabLeases: summarizeTabLeases(state),
   }
+}
+
+function summarizeTabLeases(state) {
+  const leases = []
+  for (const [tabId, sessionId] of state.tabLeases.entries()) {
+    leases.push({ tabId, sessionId })
+  }
+  leases.sort((a, b) => a.tabId - b.tabId)
+  return leases
 }
 
 function getStatusPayload(targetPort = null, preferAll = false) {
@@ -267,6 +287,133 @@ async function removeRelayPorts(portsToRemove) {
   }
 
   return existing
+}
+
+function parseTabId(value) {
+  const parsed = Number.parseInt(String(value || ''), 10)
+  if (!Number.isInteger(parsed) || parsed <= 0) return null
+  return parsed
+}
+
+function parseRelaySessionId(value) {
+  const normalized = String(value || '').trim()
+  if (!normalized) return null
+  return normalized
+}
+
+function createSessionId(state) {
+  const suffix = state.nextSessionId
+  state.nextSessionId += 1
+  return `${SESSION_ID_PREFIX}-${state.relayPort}-${Date.now().toString(36)}-${suffix.toString(36)}`
+}
+
+function getSessionForSocket(state, socket) {
+  for (const session of state.sessionsById.values()) {
+    if (session.socket === socket) {
+      return session
+    }
+  }
+  return null
+}
+
+function releaseSessionTabLease(state, session) {
+  if (!session || !Number.isInteger(session.leasedTabId)) return
+  const activeSessionId = state.tabLeases.get(session.leasedTabId)
+  if (activeSessionId === session.sessionId) {
+    state.tabLeases.delete(session.leasedTabId)
+  }
+  session.leasedTabId = null
+}
+
+function closeSession(state, session, reason = 'Session closed') {
+  if (!session) return
+  releaseSessionTabLease(state, session)
+  state.sessionsById.delete(session.sessionId)
+  clearQueuedCommandsForSocket(state, session.socket, reason)
+  failPending(state, reason, session.socket)
+}
+
+function closeSessionForSocket(state, socket, reason = 'Session closed') {
+  const session = getSessionForSocket(state, socket)
+  closeSession(state, session, reason)
+}
+
+function claimTabLease(state, session, tabId, force = false) {
+  if (!session) {
+    return { ok: false, error: 'Session is required to claim a tab lease' }
+  }
+  const normalizedTabId = parseTabId(tabId)
+  if (!normalizedTabId) {
+    return { ok: false, error: 'tabId must be a positive integer' }
+  }
+  const existingSessionId = state.tabLeases.get(normalizedTabId)
+  if (existingSessionId && existingSessionId !== session.sessionId) {
+    if (!force) {
+      return { ok: false, error: `Tab ${normalizedTabId} is already leased by another session` }
+    }
+    const existingSession = state.sessionsById.get(existingSessionId)
+    if (existingSession) {
+      existingSession.leasedTabId = null
+    }
+    state.tabLeases.delete(normalizedTabId)
+  }
+
+  if (Number.isInteger(session.leasedTabId) && session.leasedTabId !== normalizedTabId) {
+    state.tabLeases.delete(session.leasedTabId)
+  }
+  state.tabLeases.set(normalizedTabId, session.sessionId)
+  session.leasedTabId = normalizedTabId
+
+  return { ok: true, tabId: normalizedTabId, sessionId: session.sessionId }
+}
+
+function resolveSession(state, socket, params = {}, options = {}) {
+  const requestedSessionId = parseRelaySessionId(params.sessionId)
+  if (requestedSessionId) {
+    const session = state.sessionsById.get(requestedSessionId)
+    if (!session) return { ok: false, error: `Unknown session: ${requestedSessionId}` }
+    if (session.socket !== socket) return { ok: false, error: 'Session is owned by a different controller' }
+    return { ok: true, session }
+  }
+
+  const existing = getSessionForSocket(state, socket)
+  if (existing) {
+    return { ok: true, session: existing }
+  }
+
+  if (options.createIfMissing !== true) {
+    return { ok: false, error: 'No relay session for this controller. Call Grais.relay.openSession first.' }
+  }
+
+  const sessionId = createSessionId(state)
+  const session = {
+    sessionId,
+    socket,
+    client: typeof params.client === 'string' ? params.client : null,
+    createdAt: Date.now(),
+    lastSeenAt: Date.now(),
+    leasedTabId: null,
+  }
+  state.sessionsById.set(sessionId, session)
+  return { ok: true, session }
+}
+
+function listAttachedTabsWithLease(state) {
+  const attachedTabs = Array.isArray(state.extensionHeartbeatState?.attachedTabs)
+    ? state.extensionHeartbeatState.attachedTabs
+    : []
+  const tabs = []
+  for (const tab of attachedTabs) {
+    const tabId = parseTabId(tab?.tabId)
+    if (!tabId) continue
+    tabs.push({
+      ...tab,
+      tabId,
+      leasedSessionId: state.tabLeases.get(tabId) || null,
+    })
+  }
+  tabs.sort((a, b) => a.tabId - b.tabId)
+  return tabs
 }
 
 function clearQueue(state) {
@@ -479,11 +626,12 @@ function handleWebSocketConnection(socket, state) {
       state.extensionSocket = null
       state.extensionLastSeenTs = 0
       state.extensionHeartbeatState = null
+      state.extensionSessionToTab.clear()
       stopRelayHeartbeatWatchdog(state)
       notifyControllers(state, { method: 'relayEvent', params: { type: 'extension_disconnected', port: state.relayPort } })
       failPending(state, 'Relay disconnected')
     } else {
-      failPending(state, 'Relay disconnected', socket)
+      closeSessionForSocket(state, socket, 'Controller disconnected')
     }
 
     state.controllerSockets.delete(socket)
@@ -512,6 +660,7 @@ function onExtensionMessage(msg, socket, state) {
       state: String(msg.state || 'attached'),
       status: String(msg.status || ''),
     }
+    refreshExtensionSessionMap(state)
     return
   }
 
@@ -533,7 +682,8 @@ function onExtensionMessage(msg, socket, state) {
   }
 
   if (msg && msg.method === 'forwardCDPEvent') {
-    notifyControllers(state, msg)
+    updateExtensionSessionMapFromEvent(state, msg)
+    routeExtensionEventToControllers(state, msg)
     return
   }
 
@@ -548,15 +698,292 @@ function onControllerMessage(msg, socket, state) {
     return
   }
 
-  const forward = toRelayPayload(msg)
-  if (!forward) return
-
-  if (!state.extensionSocket || state.extensionSocket.readyState !== state.extensionSocket.OPEN) {
-    queueControllerCommand(state, forward, socket)
+  const relayControl = handleControllerRelayMethod(msg, socket, state)
+  if (relayControl.handled) {
+    if (typeof msg?.id === 'number') {
+      if (relayControl.ok) {
+        safeSend(socket, { id: msg.id, result: relayControl.result })
+      } else {
+        safeSend(socket, { id: msg.id, error: relayControl.error || 'Relay control command failed' })
+      }
+    }
     return
   }
 
-  forwardControllerToExtension(state, forward, socket)
+  const forward = toRelayPayload(msg)
+  if (!forward) return
+
+  const binding = bindForwardCommandToSessionLease(state, socket, forward)
+  if (!binding.ok) {
+    throwErrorToController(socket, forward.id, binding.error || 'Relay command rejected')
+    return
+  }
+
+  if (!state.extensionSocket || state.extensionSocket.readyState !== state.extensionSocket.OPEN) {
+    queueControllerCommand(state, binding.forward, socket)
+    return
+  }
+
+  forwardControllerToExtension(state, binding.forward, socket)
+}
+
+function handleControllerRelayMethod(msg, socket, state) {
+  if (!msg || typeof msg.method !== 'string' || !msg.method.startsWith('Grais.relay.')) {
+    return { handled: false }
+  }
+  if (typeof msg.id !== 'number') {
+    return { handled: true, ok: false, error: 'Relay control commands require numeric id' }
+  }
+
+  const params = typeof msg.params === 'object' && msg.params !== null ? msg.params : {}
+  if (msg.method === 'Grais.relay.openSession') {
+    const resolved = resolveSession(state, socket, params, { createIfMissing: true })
+    if (!resolved.ok) return { handled: true, ok: false, error: resolved.error }
+    const session = resolved.session
+    session.lastSeenAt = Date.now()
+    const requestedTabId = parseTabId(params.tabId)
+    if (requestedTabId) {
+      const lease = claimTabLease(state, session, requestedTabId, params.force === true)
+      if (!lease.ok) return { handled: true, ok: false, error: lease.error }
+    }
+    return {
+      handled: true,
+      ok: true,
+      result: {
+        ok: true,
+        sessionId: session.sessionId,
+        tabId: Number.isInteger(session.leasedTabId) ? session.leasedTabId : null,
+        relayPort: state.relayPort,
+      },
+    }
+  }
+
+  if (msg.method === 'Grais.relay.closeSession') {
+    const resolved = resolveSession(state, socket, params, { createIfMissing: false })
+    if (!resolved.ok) return { handled: true, ok: false, error: resolved.error }
+    const closedSessionId = resolved.session.sessionId
+    closeSession(state, resolved.session, 'Session closed by controller')
+    return { handled: true, ok: true, result: { ok: true, sessionId: closedSessionId } }
+  }
+
+  if (msg.method === 'Grais.relay.claimTab') {
+    const resolved = resolveSession(state, socket, params, { createIfMissing: false })
+    if (!resolved.ok) return { handled: true, ok: false, error: resolved.error }
+    const session = resolved.session
+    session.lastSeenAt = Date.now()
+    const lease = claimTabLease(state, session, params.tabId, params.force === true)
+    if (!lease.ok) return { handled: true, ok: false, error: lease.error }
+    return {
+      handled: true,
+      ok: true,
+      result: {
+        ok: true,
+        sessionId: session.sessionId,
+        tabId: session.leasedTabId,
+      },
+    }
+  }
+
+  if (msg.method === 'Grais.relay.releaseTab') {
+    const resolved = resolveSession(state, socket, params, { createIfMissing: false })
+    if (!resolved.ok) return { handled: true, ok: false, error: resolved.error }
+    const session = resolved.session
+    const requestedTabId = parseTabId(params.tabId)
+    if (requestedTabId && session.leasedTabId !== requestedTabId) {
+      return {
+        handled: true,
+        ok: false,
+        error: `Session ${session.sessionId} does not currently lease tab ${requestedTabId}`,
+      }
+    }
+    const releasedTabId = session.leasedTabId
+    releaseSessionTabLease(state, session)
+    return {
+      handled: true,
+      ok: true,
+      result: {
+        ok: true,
+        sessionId: session.sessionId,
+        tabId: Number.isInteger(releasedTabId) ? releasedTabId : null,
+      },
+    }
+  }
+
+  if (msg.method === 'Grais.relay.getSession') {
+    const resolved = resolveSession(state, socket, params, { createIfMissing: false })
+    if (!resolved.ok) return { handled: true, ok: false, error: resolved.error }
+    const session = resolved.session
+    return {
+      handled: true,
+      ok: true,
+      result: {
+        ok: true,
+        sessionId: session.sessionId,
+        tabId: Number.isInteger(session.leasedTabId) ? session.leasedTabId : null,
+        createdAt: session.createdAt,
+        lastSeenAt: session.lastSeenAt,
+      },
+    }
+  }
+
+  if (msg.method === 'Grais.relay.listTabs') {
+    return {
+      handled: true,
+      ok: true,
+      result: {
+        ok: true,
+        activeTab: state.extensionHeartbeatState?.activeTab || null,
+        attachedTabs: listAttachedTabsWithLease(state),
+        tabLeases: summarizeTabLeases(state),
+      },
+    }
+  }
+
+  return { handled: true, ok: false, error: `Unsupported relay control method: ${msg.method}` }
+}
+
+function bindForwardCommandToSessionLease(state, socket, forward) {
+  if (!forward || forward.method !== 'forwardCDPCommand') {
+    return { ok: true, forward }
+  }
+  const payloadParams = typeof forward.params === 'object' && forward.params !== null ? forward.params : {}
+  forward.params = payloadParams
+
+  const relaySessionId = parseRelaySessionId(payloadParams.relaySessionId)
+  if (!relaySessionId) {
+    return { ok: true, forward }
+  }
+
+  const session = state.sessionsById.get(relaySessionId)
+  if (!session) {
+    return { ok: false, error: `Unknown relay session: ${relaySessionId}` }
+  }
+  if (session.socket !== socket) {
+    return { ok: false, error: 'Relay session is owned by a different controller' }
+  }
+  session.lastSeenAt = Date.now()
+
+  let targetTabId = parseTabId(payloadParams.tabId)
+  if (targetTabId) {
+    const lease = claimTabLease(state, session, targetTabId, false)
+    if (!lease.ok) {
+      return { ok: false, error: lease.error }
+    }
+  } else if (Number.isInteger(session.leasedTabId)) {
+    targetTabId = session.leasedTabId
+  } else {
+    return {
+      ok: false,
+      error: `No tab lease for session ${relaySessionId}. Claim a tab or include params.tabId.`,
+    }
+  }
+
+  payloadParams.tabId = targetTabId
+  if (typeof payloadParams.method === 'string') {
+    const methodParams = typeof payloadParams.params === 'object' && payloadParams.params !== null
+      ? payloadParams.params
+      : {}
+    if (
+      payloadParams.method === 'Grais.debugger.attachTab' ||
+      payloadParams.method === 'Grais.debugger.ensureActiveTab' ||
+      payloadParams.method === 'Grais.debugger.getActiveTabMetadata'
+    ) {
+      methodParams.tabId = targetTabId
+      payloadParams.params = methodParams
+    }
+  }
+
+  return { ok: true, forward }
+}
+
+function refreshExtensionSessionMap(state) {
+  state.extensionSessionToTab.clear()
+  const attachedTabs = Array.isArray(state.extensionHeartbeatState?.attachedTabs)
+    ? state.extensionHeartbeatState.attachedTabs
+    : []
+  for (const attached of attachedTabs) {
+    const tabId = parseTabId(attached?.tabId)
+    const sessionId = typeof attached?.sessionId === 'string' ? attached.sessionId.trim() : ''
+    if (tabId && sessionId) {
+      state.extensionSessionToTab.set(sessionId, tabId)
+    }
+  }
+}
+
+function updateExtensionSessionMapFromEvent(state, message) {
+  if (!message || message.method !== 'forwardCDPEvent') return
+  const payload = message.params
+  const tabId = parseTabId(payload?.tabId)
+  const topSessionId = typeof payload?.sessionId === 'string' ? payload.sessionId.trim() : ''
+  if (tabId && topSessionId) {
+    state.extensionSessionToTab.set(topSessionId, tabId)
+  }
+
+  if (payload?.method === 'Target.attachedToTarget') {
+    const nestedSessionId = typeof payload?.params?.sessionId === 'string' ? payload.params.sessionId.trim() : ''
+    if (tabId && nestedSessionId) {
+      state.extensionSessionToTab.set(nestedSessionId, tabId)
+    }
+  } else if (payload?.method === 'Target.detachedFromTarget') {
+    const nestedSessionId = typeof payload?.params?.sessionId === 'string' ? payload.params.sessionId.trim() : ''
+    if (nestedSessionId) {
+      state.extensionSessionToTab.delete(nestedSessionId)
+    }
+  }
+}
+
+function resolveEventTabId(state, message) {
+  const explicitTabId = parseTabId(message?.params?.tabId)
+  if (explicitTabId) return explicitTabId
+
+  const topSessionId = typeof message?.params?.sessionId === 'string' ? message.params.sessionId.trim() : ''
+  if (topSessionId) {
+    const mapped = state.extensionSessionToTab.get(topSessionId)
+    if (Number.isInteger(mapped)) return mapped
+  }
+
+  const nestedSessionId = typeof message?.params?.params?.sessionId === 'string'
+    ? message.params.params.sessionId.trim()
+    : ''
+  if (nestedSessionId) {
+    const mapped = state.extensionSessionToTab.get(nestedSessionId)
+    if (Number.isInteger(mapped)) return mapped
+  }
+
+  return null
+}
+
+function routeExtensionEventToControllers(state, message) {
+  const eventTabId = resolveEventTabId(state, message)
+  if (!eventTabId) {
+    sendEventToSingleControllerIfSafe(state, message)
+    return
+  }
+
+  const leasedSessionId = state.tabLeases.get(eventTabId)
+  if (!leasedSessionId) {
+    sendEventToSingleControllerIfSafe(state, message)
+    return
+  }
+
+  const session = state.sessionsById.get(leasedSessionId)
+  if (!session || session.socket.readyState !== session.socket.OPEN) {
+    sendEventToSingleControllerIfSafe(state, message)
+    return
+  }
+  safeSend(session.socket, message)
+}
+
+function sendEventToSingleControllerIfSafe(state, message) {
+  const controllers = []
+  for (const controller of state.controllerSockets) {
+    if (controller === state.extensionSocket) continue
+    if (controller.readyState !== controller.OPEN) continue
+    controllers.push(controller)
+  }
+  if (controllers.length === 1) {
+    safeSend(controllers[0], message)
+  }
 }
 
 function queueControllerCommand(state, forward, socket) {
@@ -616,6 +1043,21 @@ function dequeueControllerCommand(state, relayId, reason) {
     pendingByRelayIdDelete(state, relayId)
   }
   throwErrorToController(entry.socket, entry.requestId, reason)
+}
+
+function clearQueuedCommandsForSocket(state, socket, reason = 'Controller disconnected') {
+  for (let index = state.queuedControllerRequests.length - 1; index >= 0; index -= 1) {
+    const entry = state.queuedControllerRequests[index]
+    if (entry.socket !== socket) continue
+    state.queuedControllerRequests.splice(index, 1)
+    clearTimeout(entry.timer)
+    const pending = state.pendingByRelayId.get(entry.relayId)
+    if (pending) {
+      clearTimeout(pending.timer)
+      pendingByRelayIdDelete(state, entry.relayId)
+    }
+    throwErrorToController(entry.socket, entry.requestId, reason)
+  }
 }
 
 function flushQueuedControllerCommands(state) {
@@ -932,11 +1374,17 @@ function sanitizeTabMeta(value) {
   const title = typeof value.title === 'string' ? value.title : null
   const tabId = Number.isInteger(Number(value.tabId)) ? Number(value.tabId) : null
   const windowId = Number.isInteger(Number(value.windowId)) ? Number(value.windowId) : null
+  const sessionId = typeof value.sessionId === 'string' ? value.sessionId : null
+  const targetId = typeof value.targetId === 'string' ? value.targetId : null
+  const state = typeof value.state === 'string' ? value.state : null
   return {
     tabId,
     url,
     title,
     windowId,
+    sessionId,
+    targetId,
+    state,
   }
 }
 
