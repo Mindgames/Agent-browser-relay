@@ -70,6 +70,12 @@ export GRAIS_ATTACH_TIMEOUT_MS=120000
    node scripts/read-active-tab.js --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "${GRAIS_RELAY_PORT:-18793}" --check --wait-for-attach --attach-timeout-ms "${GRAIS_ATTACH_TIMEOUT_MS:-120000}"
    ```
 
+   For multi-agent runs, include the assigned tab id:
+
+   ```bash
+   node scripts/read-active-tab.js --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "${GRAIS_RELAY_PORT:-18793}" --tab-id "<TAB_ID>" --check --wait-for-attach --attach-timeout-ms "${GRAIS_ATTACH_TIMEOUT_MS:-120000}"
+   ```
+
    Continue only if this command returns success.
 
 ### Per-tab relay port behavior
@@ -92,7 +98,9 @@ export GRAIS_ATTACH_TIMEOUT_MS=120000
   - `npm run relay:status -- --all --status-timeout-ms 3000`
 - After `relay:start`, pause and ask the human to attach the target tab before any read.
 - Run `node scripts/read-active-tab.js --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "${GRAIS_RELAY_PORT:-18793}" --check --wait-for-attach --attach-timeout-ms "${GRAIS_ATTACH_TIMEOUT_MS:-120000}"` before reads and proceed only when it succeeds.
+- For concurrent/multi-agent usage, always pass `--tab-id <tabId>` on check/read commands so each agent gets a tab lease.
 - Do not stop/restart relay during the task unless the human requests it or recovery is explicitly required.
+- Do not restart relay only because code was updated locally; updates are applied on next explicit human-approved restart.
 
 5. Read structured tab payload
 
@@ -109,6 +117,7 @@ export GRAIS_ATTACH_TIMEOUT_MS=120000
 ## Capabilities
 
 - `scripts/read-active-tab.js` default extraction: `url`, `title`, `text`, `links`, `metaDescription`.
+- Relay session leases (`--tab-id`) for concurrent agent isolation per tab on one relay port.
 - `Runtime.evaluate` expression mode with `--expression`.
 - Screenshot capture mode via `--screenshot` (optional `--screenshot-full-page`, `--screenshot-path`).
 - Preset extraction for WhatsApp and generic chat-auditing with regex filters.
@@ -124,6 +133,7 @@ export GRAIS_ATTACH_TIMEOUT_MS=120000
 
 ```bash
 node scripts/read-active-tab.js --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "${GRAIS_RELAY_PORT:-18793}" --pretty false
+node scripts/read-active-tab.js --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "${GRAIS_RELAY_PORT:-18793}" --tab-id 123 --pretty false
 node scripts/read-active-tab.js --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "${GRAIS_RELAY_PORT:-18793}" --expression "document.documentElement.outerHTML"
 node scripts/read-active-tab.js --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "${GRAIS_RELAY_PORT:-18793}" --screenshot --screenshot-full-page --screenshot-path "./tmp/page.png"
 node scripts/read-active-tab.js --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "${GRAIS_RELAY_PORT:-18793}" --preset whatsapp-messages --max-messages 200 --selector "#main"
@@ -135,3 +145,8 @@ All successful commands return a `source` object with `relayHost`, `relayPort`, 
 ## Recommended flow with agents
 
 Before fetching data in an automation flow, run a lightweight preflight once to ensure relay + attached tab state are ready.
+
+For multiple agents on one relay:
+- Resolve tab ids from relay status (`npm run relay:status -- --all --status-timeout-ms 3000`).
+- Assign one tab id per agent.
+- Use `--tab-id` in every `read-active-tab.js` call for that agent.

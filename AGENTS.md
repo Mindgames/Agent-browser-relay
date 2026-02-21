@@ -9,9 +9,11 @@ This repository provides a local browser-relay so Grais can attach to a **chosen
 
 ## Capabilities
 - Attach or detach the chosen tab from the toolbar popup.
+- Keep multiple tabs attached concurrently in one extension instance.
 - Recover/reconnect when tab context changes.
 - Execute JavaScript in-page via CDP (`Runtime.evaluate`).
 - Capture screenshots from the attached tab (`--screenshot`, optional `--screenshot-full-page`).
+- Relay session/lease isolation for multi-agent workflows (`--tab-id`).
 - Default extraction payload: `url`, `title`, `text`, `links`, `metaDescription`.
 - Full DOM extraction with custom expression (e.g. `document.documentElement.outerHTML`).
 - WhatsApp chat extraction using the `--preset whatsapp-messages` mode.
@@ -105,7 +107,10 @@ This refreshes sparse state and restores all missing tracked directories in the 
   - `node scripts/read-active-tab.js`
 - After `relay:start`, agent must stop and ask the human to attach the target tab, then wait for confirmation.
 - Agent must run `node scripts/read-active-tab.js --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "${GRAIS_RELAY_PORT:-18793}" --check --wait-for-attach --attach-timeout-ms 120000` before any data read and continue only on success.
+- For multi-agent or concurrent runs, agent must use tab leasing by setting `--tab-id <tabId>` on all read/check commands.
+- Agent must resolve `tabId` from relay status (`/status` or `npm run relay:status -- --all`) and explicitly target that tab.
 - Agent must not stop/restart relay during a task unless the human explicitly asks for restart or a hard failure requires it.
+- Agent must not restart relay only because local code changed. Code updates are picked up only on explicit human-approved restart.
 - If canonical scripts are missing, fail fast with a concrete error and stop; do not pivot to a different pipeline.
 
 Before running reads, also verify relay health:
@@ -118,26 +123,27 @@ Expect `extensionConnected: true` and low queue depth before running fetches.
 Never run bare `curl` without a timeout for relay checks.
 
 ## Workflow
-1. Open and focus the target tab in Chrome.
-2. Open the Grais Debugger popup and click "Attach this tab".
-3. Validate readiness before each read:
+1. Open and focus the target tab(s) in Chrome.
+2. Open the Grais Debugger popup and click "Attach this tab" for each tab an agent should use.
+3. Resolve each target `tabId` from status output (`npm run relay:status -- --all --status-timeout-ms 3000`).
+4. Validate readiness before each read:
 
    ```bash
-   node scripts/read-active-tab.js --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "${GRAIS_RELAY_PORT:-18793}" --check
+   node scripts/read-active-tab.js --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "${GRAIS_RELAY_PORT:-18793}" --tab-id "<TAB_ID>" --check
    ```
    ```bash
-   node scripts/read-active-tab.js --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "${GRAIS_RELAY_PORT:-18793}" --check --wait-for-attach --attach-timeout-ms 120000
+   node scripts/read-active-tab.js --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "${GRAIS_RELAY_PORT:-18793}" --tab-id "<TAB_ID>" --check --wait-for-attach --attach-timeout-ms 120000
    ```
 
    If relay is reachable this command waits for an active attachment instead of immediate failure.
 
-4. Read default extraction from attached tab:
+5. Read default extraction from a specific leased tab:
 
    ```bash
-   node scripts/read-active-tab.js --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "${GRAIS_RELAY_PORT:-18793}" --pretty false
+   node scripts/read-active-tab.js --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "${GRAIS_RELAY_PORT:-18793}" --tab-id "<TAB_ID>" --pretty false
    ```
 
-5. Read full DOM:
+6. Read full DOM:
 
    ```bash
    node scripts/read-active-tab.js \
@@ -148,10 +154,11 @@ Never run bare `curl` without a timeout for relay checks.
    node scripts/read-active-tab.js \
      --host "${GRAIS_RELAY_HOST:-127.0.0.1}" \
      --port "${GRAIS_RELAY_PORT:-18793}" \
+     --tab-id "<TAB_ID>" \
      --expression "document.documentElement.outerHTML" --pretty false
    ```
 
-6. Capture a screenshot:
+7. Capture a screenshot:
 
    ```bash
    node scripts/read-active-tab.js \
@@ -165,13 +172,14 @@ Never run bare `curl` without a timeout for relay checks.
    node scripts/read-active-tab.js \
      --host "${GRAIS_RELAY_HOST:-127.0.0.1}" \
      --port "${GRAIS_RELAY_PORT:-18793}" \
+     --tab-id "<TAB_ID>" \
      --screenshot \
      --screenshot-full-page \
      --screenshot-path "./tmp/page.png" \
      --pretty false
    ```
 
-7. Read WhatsApp messages (dry-run target):
+8. Read WhatsApp messages (dry-run target):
 
    ```bash
    node scripts/read-active-tab.js \
@@ -185,6 +193,7 @@ Never run bare `curl` without a timeout for relay checks.
    node scripts/read-active-tab.js \
      --host "${GRAIS_RELAY_HOST:-127.0.0.1}" \
      --port "${GRAIS_RELAY_PORT:-18793}" \
+     --tab-id "<TAB_ID>" \
      --preset whatsapp-messages \
      --selector "#main [data-testid=\"conversation-panel-messages\"], #main" \
      --max-messages 200 \
@@ -194,6 +203,7 @@ Never run bare `curl` without a timeout for relay checks.
 - `--wait-for-attach` waits for the bridge and tab attachment before running reads.
 - `--attach-timeout-ms <ms>` controls the max wait time (default: `120000`).
 - `--attach-poll-ms <ms>` controls retry frequency (default: `500`).
+- `--tab-id <id>` enables relay session lease routing so each agent is isolated to a specific tab.
 
 When check/read succeeds, payload includes:
 `source.relayHost`, `source.relayPort`, `source.relayStatusUrl`, and `source.relayWebSocketUrl` so humans can confirm the active relay endpoint.
@@ -219,6 +229,7 @@ npm run relay:status -- --all --status-timeout-ms 3000
 - When the extension is ON (`ON` badge), it runs a reconnect loop: it keeps trying to re-establish relay socket and restore tab attachment automatically.
 - The relay now tracks extension heartbeats (`Grais.extensionHeartbeat`) and closes stale extension connections.
 - Request windows remain bounded by timeouts, so callers receive deterministic errors for retries instead of waiting indefinitely.
+- Relay updates policy: do not restart the running relay just because repository files changed. Continue with the running process; restart only when explicitly requested by the human or when a hard failure cannot be recovered by re-attach + check.
 
 ## Skill source of truth
 - The repository root here is the source of truth for both this project and the installable skill.

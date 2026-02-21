@@ -6,6 +6,7 @@ Use this project to let Grais read data from the **attached Chrome tab** through
 - Extension (`extension/background.js`): attaches/detaches a chosen tab.
 - Relay (`relay-server.js`): local bridge default host/port `127.0.0.1:18793`, configurable per run.
 - Reader (`scripts/read-active-tab.js`): executes reads and prints JSON.
+- Relay sessions: controllers can lease a specific tab id so concurrent agents on one relay stay isolated.
 
 Set once per shell session if you run on a different endpoint:
 
@@ -79,7 +80,7 @@ npm run relay:service:update
 npm run relay:service:uninstall
 ```
 
-When relay code changes, update by restarting/reinstalling so the new binary is picked up by the managed service:
+When relay code changes, update by restarting/reinstalling so the new binary is picked up by the managed service (only when explicitly requested/planned):
 
 ```bash
 git pull
@@ -144,17 +145,31 @@ Sample fields:
 node scripts/read-active-tab.js --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "${GRAIS_RELAY_PORT:-18793}" --check --wait-for-attach --attach-timeout-ms "${GRAIS_ATTACH_TIMEOUT_MS:-120000}"
 ```
 
+For multi-agent runs (recommended), verify the assigned tab lease explicitly:
+
+```bash
+node scripts/read-active-tab.js --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "${GRAIS_RELAY_PORT:-18793}" --tab-id "<TAB_ID>" --check --wait-for-attach --attach-timeout-ms "${GRAIS_ATTACH_TIMEOUT_MS:-120000}"
+```
+
 Continue only when this command succeeds.
 
 Note:
-- Reads target the currently attached tab.
+- Reads target the currently attached tab unless you pass `--tab-id`.
+- With `--tab-id`, the reader opens a relay session and claims a tab lease so commands/events stay scoped to that tab.
 - If attach state drifts (for example after reconnect/reload), open the icon popup on the intended tab and click **Attach this tab**, then run the check command again.
+- Relay restart policy for agents: do not restart the running relay for routine tasks or just because local files changed; restart only on explicit human instruction or unrecoverable hard failure.
 
 ## 4) Read data
 Default structured payload (`url`, `title`, `text`, `links`, `metaDescription`):
 
 ```bash
 node scripts/read-active-tab.js --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "${GRAIS_RELAY_PORT:-18793}" --pretty false
+```
+
+Target a specific tab id (recommended for concurrent agents):
+
+```bash
+node scripts/read-active-tab.js --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "${GRAIS_RELAY_PORT:-18793}" --tab-id 123 --pretty false
 ```
 
 Full DOM:
