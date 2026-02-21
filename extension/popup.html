@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Grais Debugger</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --accent: #3b82f6;
+        --bg: color-mix(in oklab, canvas 92%, canvasText 12%);
+        --card: color-mix(in oklab, canvas 94%, canvasText 6%);
+        --border: color-mix(in oklab, canvasText 22%, transparent);
+        --muted: color-mix(in oklab, canvasText 70%, transparent);
+        --danger: #ef4444;
+        font-family: ui-rounded, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        width: 100%;
+        min-width: 320px;
+        max-width: 100%;
+        padding: 0;
+        background: var(--bg);
+        color: canvasText;
+      }
+      main {
+        padding: 0;
+        display: grid;
+        width: 100%;
+        gap: 10px;
+      }
+      .panel {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 0;
+        padding: 10px;
+        overflow-wrap: anywhere;
+      }
+      h1 {
+        margin: 0 0 6px 0;
+        font-size: 14px;
+      }
+      h2 {
+        margin: 0 0 6px 0;
+        font-size: 12px;
+        text-transform: uppercase;
+        color: var(--muted);
+        letter-spacing: 0.05em;
+      }
+      .row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        margin: 6px 0;
+      }
+      input,
+      select,
+      button {
+        border-radius: 0;
+        border: 1px solid var(--border);
+        background: color-mix(in oklab, canvas 95%, canvasText 5%);
+        color: canvasText;
+        padding: 8px 10px;
+        font: inherit;
+        min-width: 0;
+      }
+      select {
+        min-width: 102px;
+      }
+      button {
+        background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 76%, white 24%), var(--accent));
+        color: white;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      button.secondary {
+        background: color-mix(in oklab, canvas 92%, canvasText 8%);
+        color: canvasText;
+      }
+      .muted {
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .status {
+        font-size: 12px;
+        min-height: 16px;
+      }
+      .status.ok {
+        color: #16a34a;
+      }
+      .status.err {
+        color: var(--danger);
+      }
+      .list {
+        font-size: 11px;
+        margin: 4px 0 0 0;
+        padding-left: 14px;
+      }
+      .list li {
+        margin: 4px 0;
+        word-break: break-word;
+      }
+      .tiny {
+        font-size: 11px;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+      }
+      .panel h2,
+      .panel .muted {
+        margin-bottom: 8px;
+      }
+      .meta {
+        display: block;
+        color: var(--muted);
+        font-size: 11px;
+      }
+      .small {
+        font-size: 11px;
+        color: var(--muted);
+      }
+      .toolbar {
+        display: grid;
+        gap: 6px;
+      }
+      a {
+        color: color-mix(in oklab, var(--accent) 85%, canvasText 15%);
+        font-size: 11px;
+        text-decoration: none;
+      }
+      a:hover {
+        text-decoration: underline;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="panel">
+        <h1>Grais Debugger</h1>
+        <div id="activeTab" class="muted tiny"></div>
+        <div id="stateRow" class="muted tiny"></div>
+        <div class="row">
+          <span class="tiny">Relay:</span>
+          <span id="defaultPort" class="tiny"></span>
+          <span id="connectedPort" class="tiny"></span>
+        </div>
+        <div class="row">
+          <label for="tabPort" class="muted">Relay port</label>
+          <select id="tabPort">
+            <option value="18792">18792 (default)</option>
+            <option value="18793">18793</option>
+            <option value="18893">18893</option>
+            <option value="9222">9222 (debug)</option>
+            <option value="3000">3000 (local)</option>
+          </select>
+          <button id="savePort" type="button">Apply</button>
+          <button id="clearPort" type="button" class="secondary">Clear</button>
+        </div>
+        <div class="small">
+          Choose a relay port for this tab, then click <strong>Apply</strong>.
+        </div>
+        <div class="row toolbar">
+          <button id="attach" type="button">Attach</button>
+          <button id="refresh" type="button" class="secondary">Refresh</button>
+        </div>
+        <div id="status" class="status"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Connections</h2>
+        <ul id="connectedList" class="list"></ul>
+      </section>
+
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

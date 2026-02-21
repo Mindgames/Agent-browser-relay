@@ -3,12 +3,12 @@
 ## Purpose
 This repository provides a local browser-relay so Grais can attach to a **chosen Chrome tab**, execute script in that tab, and return structured page data to an agent workflow.
 
-- The extension manages tab attachment from the toolbar button.
+- The extension manages tab attachment from the toolbar popup.
 - The relay server tunnels requests from the skill into Chrome DevTools Protocol (CDP).
 - The `grais-tab-webdata-reader` skill reads and consumes the result payload from the relay and prints JSON directly to stdout.
 
 ## Capabilities
-- Attach or detach the chosen tab from the extension toolbar.
+- Attach or detach the chosen tab from the toolbar popup.
 - Recover/reconnect when tab context changes.
 - Execute JavaScript in-page via CDP (`Runtime.evaluate`).
 - Capture screenshots from the attached tab (`--screenshot`, optional `--screenshot-full-page`).
@@ -54,9 +54,21 @@ export GRAIS_RELAY_PORT=18793
    Override when needed:
 
    ```bash
-   node scripts/relay-manager.js start --auto-stop-ms 10800000
-   node scripts/relay-manager.js start --auto-stop-ms 0
-   ```
+  node scripts/relay-manager.js start --auto-stop-ms 10800000
+  node scripts/relay-manager.js start --auto-stop-ms 0
+  ```
+
+If the `.codex` working tree ever loses subfolders after fetch/reset operations (for example `extension/`), run:
+
+```bash
+cd ~/.codex/skills/private/grais-tab-webdata-reader
+git sparse-checkout disable
+git config --unset-all core.sparseCheckout || true
+git config --unset-all core.sparseCheckoutCone || true
+git checkout -- .
+```
+
+This refreshes sparse state and restores all missing tracked directories in the skill copy.
 
 4. Keep relay running continuously while using the extension and only stop when finished:
 
@@ -68,7 +80,7 @@ export GRAIS_RELAY_PORT=18793
 5. Human attach gate (required for agent workflows):
    - After relay is started, the agent must pause and ask the human to attach the target tab:
      - Open/focus the target tab in Chrome.
-     - Click the Grais Debugger toolbar icon so badge shows `ON`.
+     - Open the toolbar popup and click **Attach this tab** so the badge shows `ON`.
    - The agent must wait for human confirmation before continuing.
    - Before any read, the agent must run:
 
@@ -107,7 +119,7 @@ Never run bare `curl` without a timeout for relay checks.
 
 ## Workflow
 1. Open and focus the target tab in Chrome.
-2. Click the Grais Debugger icon to attach.
+2. Open the Grais Debugger popup and click "Attach this tab".
 3. Validate readiness before each read:
 
    ```bash
@@ -189,7 +201,7 @@ When check/read succeeds, payload includes:
 ## Troubleshooting
 - Red `!` badge: relay is unreachable or extension cannot attach.
 - `Timed out waiting for Runtime.evaluate`: usually means the tab is not attached.
-- If attachment drops after tab changes, click the toolbar icon once and run `--check` again.
+- If attachment drops after tab changes, open the toolbar popup on the target tab and click **Attach this tab** again, then run `--check` again.
 - If you see unstable behavior, audit processes:
 
 ```bash

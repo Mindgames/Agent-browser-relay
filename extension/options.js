@@ -1,18 +1,5 @@
 const DEFAULT_PORT = 18793
 
-function clampPort(value) {
-  const n = Number.parseInt(String(value || ''), 10)
-  if (!Number.isFinite(n)) return DEFAULT_PORT
-  if (n <= 0 || n > 65535) return DEFAULT_PORT
-  return n
-}
-
-function updateRelayUrl(port) {
-  const el = document.getElementById('relay-url')
-  if (!el) return
-  el.textContent = `http://127.0.0.1:${port}/`
-}
-
 function setStatus(kind, message) {
   const status = document.getElementById('status')
   if (!status) return
@@ -31,7 +18,7 @@ async function checkRelayReachable(port) {
   } catch {
     setStatus(
       'error',
-      `Relay not reachable at ${url}. Start the Grais Debugger browser relay on this machine, then click the toolbar button again.`,
+      `Relay not reachable at ${url}. Start the Grais Debugger browser relay on this machine, then use the toolbar popup again.`,
     )
   } finally {
     clearTimeout(t)
@@ -40,20 +27,10 @@ async function checkRelayReachable(port) {
 
 async function load() {
   const stored = await chrome.storage.local.get(['relayPort'])
-  const port = clampPort(stored.relayPort)
-  document.getElementById('port').value = String(port)
-  updateRelayUrl(port)
-  await checkRelayReachable(port)
+  const port = Number.parseInt(String(stored.relayPort || DEFAULT_PORT), 10)
+  const safePort = Number.isFinite(port) && port > 0 && port <= 65535 ? port : DEFAULT_PORT
+  setStatus('ok', `Checking relay on http://127.0.0.1:${safePort}/`)
+  await checkRelayReachable(safePort)
 }
 
-async function save() {
-  const input = document.getElementById('port')
-  const port = clampPort(input.value)
-  await chrome.storage.local.set({ relayPort: port })
-  input.value = String(port)
-  updateRelayUrl(port)
-  await checkRelayReachable(port)
-}
-
-document.getElementById('save').addEventListener('click', () => void save())
 void load()

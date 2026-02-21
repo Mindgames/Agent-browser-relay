@@ -48,11 +48,23 @@ export GRAIS_ATTACH_TIMEOUT_MS=120000
    - Enable developer mode
    - Load unpacked from `~/.codex/skills/private/grais-tab-webdata-reader/extension`
 
-4. Attach the extension to the target tab (click toolbar icon)
+3. Attach the extension to the target tab (open toolbar popup and click attach)
+
+   Optional per-tab relay: in the popup, set **Tab port** before clicking attach if this tab should use a non-default relay port.
 
    Agent requirement: after `relay:start`, pause and ask the human to do this attach step, then wait for confirmation before continuing.
 
-5. Check readiness and attach state
+   If your `.codex` skill folder drops `extension/` after a `git fetch` or pull, repair it from the repo:
+
+   ```bash
+   cd ~/.codex/skills/private/grais-tab-webdata-reader
+   git sparse-checkout disable
+   git config --unset-all core.sparseCheckout || true
+   git config --unset-all core.sparseCheckoutCone || true
+   git checkout -- .
+   ```
+
+4. Check readiness and attach state
 
    ```bash
    node scripts/read-active-tab.js --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "${GRAIS_RELAY_PORT:-18793}" --check --wait-for-attach --attach-timeout-ms "${GRAIS_ATTACH_TIMEOUT_MS:-120000}"
@@ -65,6 +77,7 @@ export GRAIS_ATTACH_TIMEOUT_MS=120000
 - A tab with no saved relay-port mapping uses the global default (`GRAIS_RELAY_PORT`, default `18793`).
 - After a successful attach, the extension saves that tab’s mapped relay port and reuses it automatically.
 - Closed tabs have their mapping removed automatically.
+
 
 ## Mandatory behavior for agents
 - Use fixed commands from this repo. Do not try to "discover" alternate script names.
