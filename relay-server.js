@@ -7,7 +7,7 @@ const os = require('node:os')
 const path = require('node:path')
 const { WebSocketServer } = require('ws')
 
-const DEFAULT_PORT = 18792
+const DEFAULT_PORT = 18793
 const DEFAULT_HOST = '127.0.0.1'
 const DEFAULT_TIMEOUT_MS = 12000
 const DEFAULT_MAX_RUNTIME_MS = 0
@@ -15,15 +15,19 @@ const QUEUED_REQUEST_TIMEOUT_MS = 12000
 const RELAY_HEARTBEAT_TIMEOUT_MS = 15000
 const RELAY_HEARTBEAT_INTERVAL_MS = 2500
 const MAX_QUEUED_CONTROLLER_COMMANDS = 16
+const ALLOWED_ADMIN_ACTIONS = ['add', 'remove']
 
 const args = parseArgs(process.argv.slice(2))
 if (args.help) {
   console.log(`Usage:
-  node relay-server.js [--host 127.0.0.1] [--port 18792] [--timeout 12000] [--max-runtime-ms 0]
+  node relay-server.js [--host 127.0.0.1] [--ports 18793[,18794]]
+  node relay-server.js [--host 127.0.0.1] [--port 18793]
+  node relay-server.js [--host 127.0.0.1] [--port 18793] [--timeout 12000] [--max-runtime-ms 0]
 
 Options:
   --host            Bind address (default: ${DEFAULT_HOST})
-  --port            Listen port (default: ${DEFAULT_PORT})
+  --port            Compatibility alias for a single-port relay
+  --ports           Comma-separated list of physical relay ports (default: ${DEFAULT_PORT})
   --timeout         Controller request timeout (default: ${DEFAULT_TIMEOUT_MS})
   --max-runtime-ms  Auto-stop relay after N ms (default: disabled)
 `)
@@ -31,64 +35,366 @@ Options:
 }
 
 const host = args.host || DEFAULT_HOST
-const port = clampPort(args.port, DEFAULT_PORT)
+const relayPorts = parsePortList(args.ports || args.port, [DEFAULT_PORT])
+if (relayPorts.length === 0) {
+  throw new Error(`No valid ports provided from input: ${String(args.ports || args.port || DEFAULT_PORT)}`)
+}
+
 const requestTimeoutMs = parsePositiveInt(args.timeout, DEFAULT_TIMEOUT_MS, 'timeout')
 const maxRuntimeMs = parseNonNegativeInt(args.maxRuntimeMs, DEFAULT_MAX_RUNTIME_MS, 'max-runtime-ms')
-const relayLockPath = getRelayLockPath(host, port)
+const relayLockPath = getRelayLockPath(host)
 const relayLockFd = acquireRelayLock(relayLockPath)
 let autoShutdownTimer = null
 let shuttingDown = false
 
-/** @type {import('node:net').Socket | null} */
-let extensionSocket = null
-/** @type {Set<any>} */
-const controllerSockets = new Set()
-/** @type {Map<number, {tabId:number, targetId:string|null, title:string|null, url:string|null, attachedAtMs:number, lastSeenAtMs:number}>} */
-const attachedTabsById = new Map()
-/** @type {Map<number, {socket: any, requestId: number, timer: NodeJS.Timeout}>} */
-const pendingByRelayId = new Map()
-/** @type {Array<{relayId: number, socket: any, requestId: number, payload: any, timer: NodeJS.Timeout}>} */
-const queuedControllerRequests = []
-let nextRelayId = 1
-let extensionLastSeenTs = 0
-let relayHeartbeatWatchdog = null
+/** @type {Map<number, PortState>} */
+const portStates = new Map()
 
 const socketMeta = new WeakMap()
 
-const httpServer = http.createServer((request, response) => {
+initializePorts(relayPorts).catch((error) => {
+  console.error(error instanceof Error ? error.message : String(error))
+  process.exit(1)
+})
+
+function initializePorts(ports) {
+  return new Promise((resolve, reject) => {
+    const sortedPorts = [...new Set(ports)].sort((a, b) => a - b)
+    const listeners = sortedPorts.map((port) => startPortListener(port))
+    Promise.all(listeners)
+      .then(() => {
+        const portsLabel = sortedPorts.join(', ')
+        if (sortedPorts.length > 1) {
+          console.log(`Grais Debugger relay listening on ports: ${portsLabel} (shared relay hub)`)
+        } else {
+          console.log(`Grais Debugger relay listening on ws://${host}:${sortedPorts[0]}/extension`)
+        }
+        console.log(`Health endpoint: http://${host}:${sortedPorts[0]}/`)
+        if (maxRuntimeMs > 0) {
+          autoShutdownTimer = setTimeout(() => {
+            console.log(`Auto-stopping relay after max runtime (${maxRuntimeMs}ms)`)
+            shutdown(0)
+          }, maxRuntimeMs)
+        }
+        resolve()
+      })
+      .catch((error) => {
+        shutdown(1, `Failed to start port ${portsLabel}: ${error instanceof Error ? error.message : String(error)}`)
+        reject(error)
+      })
+  })
+}
+
+function createPortState(relayPort) {
+  return {
+    relayPort,
+    extensionSocket: null,
+    controllerSockets: new Set(),
+    pendingByRelayId: new Map(),
+    queuedControllerRequests: [],
+    nextRelayId: 1,
+    extensionLastSeenTs: 0,
+    extensionHeartbeatState: null,
+    relayHeartbeatWatchdog: null,
+    httpServer: null,
+    wss: null,
+  }
+}
+
+function getPortState(relayPort) {
+  return portStates.get(relayPort) || null
+}
+
+function summarizePortState(state) {
+  const extensionConnected = Boolean(state.extensionSocket && state.extensionSocket.readyState === state.extensionSocket.OPEN)
+  const extensionLastSeenAgoMs = state.extensionLastSeenTs ? Date.now() - state.extensionLastSeenTs : null
+
+  return {
+    port: state.relayPort,
+    extensionConnected,
+    extensionLastSeenAgoMs,
+    queuedControllerCommands: state.queuedControllerRequests.length,
+    connectedControllerClients: state.controllerSockets.size,
+    pendingCommands: state.pendingByRelayId.size,
+    activeTab: state.extensionHeartbeatState?.activeTab || null,
+    attachedTabs: Array.isArray(state.extensionHeartbeatState?.attachedTabs)
+      ? state.extensionHeartbeatState.attachedTabs
+      : [],
+    lastHeartbeatTs: state.extensionHeartbeatState?.ts || null,
+  }
+}
+
+function getSinglePortStatus(state) {
+  return {
+    ok: true,
+    service: 'grais-debugger-relay',
+    host,
+    port: state.relayPort,
+    extensionConnected: Boolean(state.extensionSocket && state.extensionSocket.readyState === state.extensionSocket.OPEN),
+    extensionLastSeenAgoMs: state.extensionLastSeenTs ? Date.now() - state.extensionLastSeenTs : null,
+    queuedControllerCommands: state.queuedControllerRequests.length,
+    connectedControllerClients: state.controllerSockets.size,
+    pendingCommands: state.pendingByRelayId.size,
+    activeTab: state.extensionHeartbeatState?.activeTab || null,
+    attachedTabs: Array.isArray(state.extensionHeartbeatState?.attachedTabs)
+      ? state.extensionHeartbeatState.attachedTabs
+      : [],
+  }
+}
+
+function getStatusPayload(targetPort = null, preferAll = false) {
+  if (targetPort !== null) {
+    const state = getPortState(targetPort)
+    if (!state) {
+      return { ok: false, error: `No relay listener configured on port ${targetPort}` }
+    }
+    return getSinglePortStatus(state)
+  }
+
+  const summary = Array.from(portStates.values())
+    .map(summarizePortState)
+    .sort((a, b) => a.port - b.port)
+
+  if (!preferAll && summary.length === 1) {
+    return getSinglePortStatus(portStates.values().next().value)
+  }
+
+  const extensionPorts = summary.filter((entry) => entry.extensionConnected).map((entry) => entry.port)
+  const extensionConnected = extensionPorts.length > 0
+  const extensionLastSeenAgoMs =
+    summary.find((entry) => typeof entry.extensionLastSeenAgoMs === 'number')
+      ?.extensionLastSeenAgoMs ?? null
+  const queuedControllerCommands = summary.reduce((total, entry) => total + entry.queuedControllerCommands, 0)
+
+  return {
+    ok: true,
+    service: 'grais-debugger-relay',
+    host,
+    ports: summary,
+    portCount: summary.length,
+    extensionConnected,
+    extensionLastSeenAgoMs,
+    queuedControllerCommands,
+    extensionPorts,
+    activePorts: extensionPorts.length,
+  }
+}
+
+function startPortListener(relayPort) {
+  if (portStates.has(relayPort)) return Promise.resolve()
+  if (!Number.isInteger(relayPort) || relayPort <= 0 || relayPort > 65535) {
+    return Promise.reject(new Error(`Invalid relay port ${relayPort}`))
+  }
+
+  const state = createPortState(relayPort)
+  const server = http.createServer((request, response) => {
+    handleHttpRequest(request, response, state)
+  })
+  const wss = new WebSocketServer({ noServer: true })
+
+  wss.on('connection', (socket) => {
+    handleWebSocketConnection(socket, state)
+  })
+
+  server.on('upgrade', (request, socket, head) => {
+    handleUpgrade(request, socket, head, state, wss)
+  })
+
+  state.httpServer = server
+  state.wss = wss
+  portStates.set(relayPort, state)
+
+  return new Promise((resolve, reject) => {
+    const onError = (error) => {
+      portStates.delete(relayPort)
+      reject(error)
+    }
+    server.once('error', onError)
+    server.listen(relayPort, host, () => {
+      server.off('error', onError)
+      resolve()
+    })
+  })
+}
+
+async function addRelayPorts(portsToAdd) {
+  const normalized = [...new Set(portsToAdd)]
+    .filter(Number.isInteger)
+    .filter((port) => !portStates.has(port))
+  for (const port of normalized) {
+    await startPortListener(port)
+    console.log(`Added relay listener on ${host}:${port}`)
+  }
+  return normalized
+}
+
+async function removeRelayPorts(portsToRemove) {
+  const existing = [...new Set(portsToRemove)].filter((port) => portStates.has(port))
+  for (const port of existing) {
+    const state = portStates.get(port)
+    if (!state) continue
+
+    if (state.extensionSocket && state.extensionSocket.readyState === state.extensionSocket.OPEN) {
+      state.extensionSocket.close(1000, 'relay port removed')
+    }
+
+    for (const controller of state.controllerSockets) {
+      controller.close(1000, 'relay port removed')
+    }
+    state.controllerSockets.clear()
+
+    failPending(state, 'Relay port removed')
+    clearQueue(state)
+
+    stopRelayHeartbeatWatchdog(state)
+
+    await new Promise((resolve) => {
+      state.wss.close(() => resolve())
+    })
+
+    await new Promise((resolve) => {
+      state.httpServer.close(() => {
+        resolve()
+      })
+    })
+
+    portStates.delete(port)
+    console.log(`Removed relay listener on ${host}:${port}`)
+  }
+
+  if (portStates.size === 0) {
+    shutdown(0, 'All relay ports removed')
+  }
+
+  return existing
+}
+
+function clearQueue(state) {
+  for (const entry of state.queuedControllerRequests) {
+    clearTimeout(entry.timer)
+    const pending = state.pendingByRelayId.get(entry.relayId)
+    if (pending) {
+      clearTimeout(pending.timer)
+      pendingByRelayIdDelete(state, entry.relayId)
+    }
+  }
+  state.queuedControllerRequests.length = 0
+}
+
+function parseAdminRequestBody(request, response, callback) {
+  const chunks = []
+  request.on('data', (chunk) => chunks.push(chunk))
+  request.on('end', () => {
+    const raw = Buffer.concat(chunks).toString('utf8').trim()
+    if (!raw) {
+      callback(null, null)
+      return
+    }
+    try {
+      callback(null, JSON.parse(raw))
+    } catch (error) {
+      callback(error)
+    }
+  })
+  request.on('error', (error) => callback(error))
+}
+
+function respondJson(response, statusCode, payload, method = 'GET') {
+  response.statusCode = statusCode
+  response.setHeader('content-type', 'application/json')
+  if (method === 'HEAD') {
+    response.end('')
+    return
+  }
+  response.end(JSON.stringify(payload))
+}
+
+function handleHttpRequest(request, response, state) {
   const method = request.method || 'GET'
-  const pathname = request.url?.split('?')[0] || '/'
+  const requestUrl = new URL(request.url || '', `http://${request.headers.host || `${host}:${state.relayPort}`}`)
+  const pathname = requestUrl.pathname
 
   if (pathname === '/status') {
-      if (method === 'GET' || method === 'HEAD') {
-      const extensionConnected = Boolean(extensionSocket && extensionSocket.readyState === extensionSocket.OPEN)
-      const extensionLastSeenAgoMs = extensionLastSeenTs ? Date.now() - extensionLastSeenTs : null
-      response.statusCode = 200
-      response.setHeader('content-type', 'application/json')
-      response.end(
-        method === 'HEAD'
-          ? ''
-          : JSON.stringify({
-              ok: true,
-              service: 'grais-debugger-relay',
-              host,
-              port,
-              extensionConnected,
-              extensionLastSeenAgoMs,
-              attachedTabs: getAttachedTabsSnapshot(),
-              queuedControllerCommands: queuedControllerRequests.length,
-              connectedControllerClients: controllerSockets.size,
-              pendingCommands: pendingByRelayId.size,
-            }),
-      )
+    if (method !== 'GET' && method !== 'HEAD') {
+      response.setHeader('allow', 'GET,HEAD')
+      return respondJson(response, 405, { ok: false, error: 'method_not_allowed' }, method)
+    }
+    const requestedPortRaw = requestUrl.searchParams.get('port')
+    const requestedPort = requestedPortRaw !== null ? parsePortOrNull(requestedPortRaw) : null
+    if (requestedPortRaw !== null && requestedPort === null) {
+      return respondJson(response, 400, { ok: false, error: `Invalid query parameter port: ${requestedPortRaw}` }, method)
+    }
+
+    const preferAll = requestUrl.searchParams.get('all') === '1' || requestUrl.searchParams.get('all') === 'true'
+    const status = getStatusPayload(requestedPort, preferAll)
+    if (!status.ok && requestedPort !== null) {
+      return respondJson(response, 404, status, method)
+    }
+    return respondJson(response, 200, status, method)
+  }
+
+  if (pathname === '/admin/ports') {
+    if (method === 'GET' || method === 'HEAD') {
+      const payload = {
+        ok: true,
+        host,
+        ports: Array.from(portStates.keys()).sort((a, b) => a - b),
+      }
+      return respondJson(response, 200, payload, method)
+    }
+
+    if (method === 'POST') {
+      parseAdminRequestBody(request, response, async (err, payload) => {
+        if (err) {
+          return respondJson(response, 400, { ok: false, error: 'Invalid JSON body' }, method)
+        }
+
+        const action = String(payload?.action || '').trim().toLowerCase()
+        const bodyPorts = parsePortList(payload?.ports, [])
+        const portsToManage = new Set([...bodyPorts])
+
+        const single = parsePortOrNull(payload?.port)
+        if (single !== null) portsToManage.add(single)
+
+        if (!ALLOWED_ADMIN_ACTIONS.includes(action) || portsToManage.size === 0) {
+          return respondJson(
+            response,
+            400,
+            { ok: false, error: 'Payload requires action=add|remove and one or more ports' },
+            method,
+          )
+        }
+
+        let changedPorts
+        try {
+          if (action === 'add') {
+            changedPorts = await addRelayPorts(Array.from(portsToManage))
+          } else {
+            changedPorts = await removeRelayPorts(Array.from(portsToManage))
+          }
+        } catch (error) {
+          return respondJson(
+            response,
+            500,
+            { ok: false, error: error instanceof Error ? error.message : String(error) },
+            method,
+          )
+        }
+
+        const payloadOut = {
+          ok: true,
+          action,
+          changedPorts,
+          activePorts: Array.from(portStates.keys()).sort((a, b) => a - b),
+          status: getStatusPayload(null, true),
+        }
+        return respondJson(response, 200, payloadOut, method)
+      })
       return
     }
 
-    response.statusCode = 405
-    response.setHeader('allow', 'GET,HEAD')
-    response.setHeader('content-type', 'application/json')
-    response.end(JSON.stringify({ ok: false, error: 'method_not_allowed' }))
-    return
+    response.setHeader('allow', 'GET,HEAD,POST')
+    return respondJson(response, 405, { ok: false, error: 'method_not_allowed' }, method)
   }
 
   if (pathname !== '/' && pathname !== '') {
@@ -99,28 +405,34 @@ const httpServer = http.createServer((request, response) => {
   }
 
   if (method === 'GET' || method === 'HEAD') {
-    response.statusCode = 200
-    response.setHeader('content-type', 'application/json')
-    response.end(method === 'HEAD' ? '' : JSON.stringify({ ok: true, service: 'grais-debugger-relay' }))
-    return
+    return respondJson(response, 200, { ok: true, service: 'grais-debugger-relay' }, method)
   }
 
-  response.statusCode = 405
   response.setHeader('allow', 'GET,HEAD')
-  response.setHeader('content-type', 'application/json')
-  response.end(JSON.stringify({ ok: false, error: 'method_not_allowed' }))
-})
+  return respondJson(response, 405, { ok: false, error: 'method_not_allowed' }, method)
+}
 
-const wss = new WebSocketServer({ noServer: true })
+function handleUpgrade(request, socket, head, state, wss) {
+  const pathname = new URL(request.url || '', `http://${request.headers.host || `${host}:${state.relayPort}`}`).pathname
+  if (pathname !== '/extension') {
+    socket.write('HTTP/1.1 404 Not Found\r\n\r\n')
+    socket.destroy()
+    return
+  }
+  wss.handleUpgrade(request, socket, head, (ws) => {
+    wss.emit('connection', ws, request)
+  })
+}
 
-wss.on('connection', (socket) => {
-  const state = {
+function handleWebSocketConnection(socket, state) {
+  const entry = {
     role: 'unknown',
     socket,
     seenAtMs: Date.now(),
+    relayPort: state.relayPort,
   }
-  socketMeta.set(socket, state)
-  controllerSockets.add(socket)
+  socketMeta.set(socket, entry)
+  state.controllerSockets.add(socket)
 
   socket.on('message', (raw) => {
     let msg
@@ -130,99 +442,82 @@ wss.on('connection', (socket) => {
       return
     }
 
-    if (state.role === 'unknown') {
+    if (entry.role === 'unknown') {
       if (isControllerMessage(msg)) {
-        state.role = 'controller'
-      } else if (isExtensionMessage(msg)) {
-        state.role = 'extension'
-      } else if (msg && msg.method === 'ping') {
-        // Allow controllers to send ping keepalives before any request is seen.
-        state.role = 'controller'
+        entry.role = 'controller'
+      } else if (isExtensionMessage(msg) || msg?.method === 'ping') {
+        entry.role = 'extension'
       } else {
         return
       }
 
-      if (state.role === 'extension') {
-        state.seenAtMs = Date.now()
-        extensionLastSeenTs = state.seenAtMs
-        attachedTabsById.clear()
-        if (extensionSocket && extensionSocket !== socket && extensionSocket.readyState === extensionSocket.OPEN) {
-          extensionSocket.close(1008, 'new_extension_client')
+      if (entry.role === 'extension') {
+        entry.seenAtMs = Date.now()
+        state.extensionLastSeenTs = entry.seenAtMs
+        if (state.extensionSocket && state.extensionSocket !== socket && state.extensionSocket.readyState === state.extensionSocket.OPEN) {
+          state.extensionSocket.close(1008, 'new_extension_client')
         }
-        extensionSocket = socket
-        startRelayHeartbeatWatchdog()
-        notifyControllers({ method: 'relayEvent', params: { type: 'extension_connected' } })
-        flushQueuedControllerCommands()
+        state.extensionSocket = socket
+        startRelayHeartbeatWatchdog(state)
+        notifyControllers(state, { method: 'relayEvent', params: { type: 'extension_connected', port: state.relayPort } })
+        flushQueuedControllerCommands(state)
       }
     }
 
-    if (state.role === 'extension') {
-      return onExtensionMessage(msg, socket)
+    if (entry.role === 'extension') {
+      return onExtensionMessage(msg, socket, state)
     }
-
-    return onControllerMessage(msg, socket)
+    if (entry.role === 'controller') {
+      return onControllerMessage(msg, socket, state)
+    }
+    return
   })
 
   socket.on('close', () => {
-    const wasExtensionSocket = extensionSocket === socket
-
-    if (extensionSocket === socket) {
-      extensionSocket = null
-      extensionLastSeenTs = 0
-      attachedTabsById.clear()
-      stopRelayHeartbeatWatchdog()
-      notifyControllers({ method: 'relayEvent', params: { type: 'extension_disconnected' } })
+    const wasExtension = state.extensionSocket === socket
+    if (wasExtension) {
+      state.extensionSocket = null
+      state.extensionLastSeenTs = 0
+      state.extensionHeartbeatState = null
+      stopRelayHeartbeatWatchdog(state)
+      notifyControllers(state, { method: 'relayEvent', params: { type: 'extension_disconnected', port: state.relayPort } })
+      failPending(state, 'Relay disconnected')
+    } else {
+      failPending(state, 'Relay disconnected', socket)
     }
 
-    failPending(wasExtensionSocket ? null : socket, 'Relay disconnected')
-
-    controllerSockets.delete(socket)
+    state.controllerSockets.delete(socket)
     socketMeta.delete(socket)
   })
 
   socket.on('error', () => {
-    // Keep sockets resilient. Individual handlers handle failures explicitly.
+    // Keep resilient.
   })
-})
+}
 
-httpServer.on('upgrade', (request, socket, head) => {
-  const pathname = new URL(request.url || '', `http://${request.headers.host}`).pathname
-  if (pathname !== '/extension') {
-    socket.write('HTTP/1.1 404 Not Found\r\n\r\n')
-    socket.destroy()
-    return
-  }
-
-  wss.handleUpgrade(request, socket, head, (ws) => {
-    wss.emit('connection', ws, request)
-  })
-})
-
-function onExtensionMessage(msg, socket) {
-  const state = socketMeta.get(socket)
-  if (state) {
-    state.seenAtMs = Date.now()
-    extensionLastSeenTs = state.seenAtMs
-  }
+function onExtensionMessage(msg, socket, state) {
+  const now = Date.now()
+  const entry = socketMeta.get(socket)
+  if (entry) entry.seenAtMs = now
+  state.extensionLastSeenTs = now
 
   if (msg && msg.method === 'Grais.extensionHeartbeat') {
-    return
-  }
-
-  if (msg && msg.method === 'Grais.extensionTabState') {
-    handleExtensionTabState(msg.params)
+    state.extensionHeartbeatState = {
+      ts: now,
+      relayPort: Number.isFinite(Number(msg.relayPort)) ? Number(msg.relayPort) : state.relayPort,
+      activeTab: cleanTabMeta(msg.activeTab),
+      attachedTabs: Array.isArray(msg.attachedTabs)
+        ? msg.attachedTabs.map((entry) => sanitizeTabMeta(entry)).filter(Boolean)
+        : [],
+      state: String(msg.state || 'attached'),
+      status: String(msg.status || ''),
+    }
     return
   }
 
   if (msg && typeof msg.id === 'number') {
-    console.log('[Relay] extension response', { relayId: msg.id })
-    // Reply to a previously proxied controller request.
-    const pending = pendingByRelayId.get(msg.id)
-    console.log('[Relay] extension response lookup', {
-      relayId: msg.id,
-      hasPending: Boolean(pending),
-      requestId: pending?.requestId,
-    })
+    console.log('[Relay] extension response', { relayId: msg.id, port: state.relayPort })
+    const pending = state.pendingByRelayId.get(msg.id)
     if (!pending) return
 
     const payload = {
@@ -232,13 +527,13 @@ function onExtensionMessage(msg, socket) {
     }
 
     clearTimeout(pending.timer)
-    pendingByRelayId.delete(msg.id)
+    pendingByRelayIdDelete(state, msg.id)
     safeSend(pending.socket, payload)
     return
   }
 
   if (msg && msg.method === 'forwardCDPEvent') {
-    notifyControllers(msg)
+    notifyControllers(state, msg)
     return
   }
 
@@ -247,35 +542,324 @@ function onExtensionMessage(msg, socket) {
   }
 }
 
-function onControllerMessage(msg, socket) {
-  if (typeof msg?.id === 'number' && typeof msg?.method === 'string') {
-    console.log('[Relay] controller request', {
-      id: msg.id,
-      method: msg.method,
-      hasParams: Boolean(msg?.params),
-    })
-  }
+function onControllerMessage(msg, socket, state) {
   if (msg && msg.method === 'ping') {
     safeSend(socket, { method: 'pong' })
     return
   }
 
   const forward = toRelayPayload(msg)
-  if (!forward) {
+  if (!forward) return
+
+  if (!state.extensionSocket || state.extensionSocket.readyState !== state.extensionSocket.OPEN) {
+    queueControllerCommand(state, forward, socket)
     return
   }
 
-  if (!extensionSocket || extensionSocket.readyState !== extensionSocket.OPEN) {
-    queueControllerCommand(forward, socket)
-    return
-  }
-
-  forwardControllerToExtension(forward, socket)
+  forwardControllerToExtension(state, forward, socket)
 }
 
-function getRelayLockPath(hostname, relayPort) {
+function queueControllerCommand(state, forward, socket) {
+  while (state.queuedControllerRequests.length >= MAX_QUEUED_CONTROLLER_COMMANDS) {
+    const overflow = state.queuedControllerRequests.shift()
+    if (!overflow) break
+    clearTimeout(overflow.timer)
+    pendingByRelayIdDelete(state, overflow.relayId)
+    throwErrorToController(overflow.socket, overflow.requestId, 'Relay queue full; command dropped')
+  }
+
+  const relayId = state.nextRelayId
+  state.nextRelayId += 1
+  const payload = {
+    id: relayId,
+    method: forward.method,
+    params: forward.params,
+  }
+
+  const queueEntry = {
+    relayId,
+    socket,
+    requestId: forward.id,
+    payload,
+    timer: setTimeout(() => {
+      dequeueControllerCommand(state, relayId, `Relay has no active extension connection for ${QUEUED_REQUEST_TIMEOUT_MS}ms`)
+    }, QUEUED_REQUEST_TIMEOUT_MS),
+  }
+
+  state.queuedControllerRequests.push(queueEntry)
+  state.pendingByRelayId.set(relayId, {
+    socket,
+    requestId: forward.id,
+    timer: queueEntry.timer,
+  })
+
+  notifyControllers(state, {
+    method: 'relayEvent',
+    params: {
+      type: 'extension_offline_queue',
+      port: state.relayPort,
+      queue: state.queuedControllerRequests.length,
+      requestId: forward.id,
+    },
+  })
+}
+
+function dequeueControllerCommand(state, relayId, reason) {
+  const index = state.queuedControllerRequests.findIndex((entry) => entry.relayId === relayId)
+  if (index === -1) return
+  const entry = state.queuedControllerRequests[index]
+  state.queuedControllerRequests.splice(index, 1)
+  clearTimeout(entry.timer)
+  const pending = state.pendingByRelayId.get(relayId)
+  if (pending) {
+    clearTimeout(pending.timer)
+    pendingByRelayIdDelete(state, relayId)
+  }
+  throwErrorToController(entry.socket, entry.requestId, reason)
+}
+
+function flushQueuedControllerCommands(state) {
+  if (!state.extensionSocket || state.extensionSocket.readyState !== state.extensionSocket.OPEN) return
+
+  while (state.queuedControllerRequests.length > 0) {
+    const entry = state.queuedControllerRequests.shift()
+    if (!entry) return
+    const pending = state.pendingByRelayId.get(entry.relayId)
+    if (!pending) {
+      clearTimeout(entry.timer)
+      continue
+    }
+
+    clearTimeout(pending.timer)
+    state.pendingByRelayId.set(entry.relayId, {
+      ...pending,
+      timer: setTimeout(() => {
+        pendingByRelayIdDelete(state, entry.relayId)
+        throwErrorToController(entry.socket, entry.requestId, `Relay timed out after ${requestTimeoutMs}ms`)
+      }, requestTimeoutMs),
+    })
+
+    const replayPending = state.pendingByRelayId.get(entry.relayId)
+    if (!replayPending) {
+      clearTimeout(entry.timer)
+      continue
+    }
+
+    try {
+      sendToExtension(state, entry.payload)
+    } catch (error) {
+      clearTimeout(replayPending.timer)
+      clearTimeout(entry.timer)
+      pendingByRelayIdDelete(state, entry.relayId)
+      throwErrorToController(
+        entry.socket,
+        entry.requestId,
+        `Failed to dispatch queued command: ${error instanceof Error ? error.message : String(error)}`,
+      )
+    }
+  }
+}
+
+function forwardControllerToExtension(state, forward, socket) {
+  const relayId = state.nextRelayId
+  state.nextRelayId += 1
+  console.log('[Relay] forwarding to extension', {
+    relayId,
+    requestId: forward.id,
+    method: forward.method,
+    port: state.relayPort,
+  })
+  const payload = {
+    id: relayId,
+    method: forward.method,
+    params: forward.params,
+  }
+
+  state.pendingByRelayId.set(relayId, {
+    socket,
+    requestId: forward.id,
+    timer: setTimeout(() => {
+      pendingByRelayIdDelete(state, relayId)
+      throwErrorToController(socket, forward.id, `Relay timed out after ${requestTimeoutMs}ms`)
+    }, requestTimeoutMs),
+  })
+
+  const pending = state.pendingByRelayId.get(relayId)
+  if (!pending) return
+  try {
+    sendToExtension(state, payload)
+  } catch (error) {
+    clearTimeout(pending.timer)
+    pendingByRelayIdDelete(state, relayId)
+    if (!state.extensionSocket || state.extensionSocket.readyState !== state.extensionSocket.OPEN) {
+      queueControllerCommand(state, forward, socket)
+      return
+    }
+    throwErrorToController(
+      socket,
+      forward.id,
+      `Failed to dispatch command: ${error instanceof Error ? error.message : String(error)}`,
+    )
+  }
+}
+
+function sendToExtension(state, payload) {
+  if (!state.extensionSocket || state.extensionSocket.readyState !== state.extensionSocket.OPEN) {
+    throw new Error('Relay has no active extension connection')
+  }
+  console.log('[Relay] sendToExtension', {
+    id: payload?.id,
+    method: payload?.method,
+    hasParams: Boolean(payload?.params),
+    port: state.relayPort,
+  })
+  state.extensionSocket.send(JSON.stringify(payload))
+}
+
+function failPending(state, reason, socket) {
+  for (const [relayId, pending] of state.pendingByRelayId.entries()) {
+    if (socket && pending.socket !== socket) {
+      continue
+    }
+
+    clearTimeout(pending.timer)
+    state.pendingByRelayId.delete(relayId)
+    throwErrorToController(pending.socket, pending.requestId, reason)
+  }
+}
+
+function pendingByRelayIdDelete(state, relayId) {
+  const pending = state.pendingByRelayId.get(relayId)
+  if (!pending) return
+  clearTimeout(pending.timer)
+  state.pendingByRelayId.delete(relayId)
+}
+
+function toRelayPayload(msg) {
+  if (typeof msg !== 'object' || msg === null) return null
+  if (typeof msg.id !== 'number') return null
+  if (typeof msg.method !== 'string') return null
+  const { id, method, params } = msg
+  if (!method) return null
+  return { id, method, params }
+}
+
+function isControllerMessage(msg) {
+  if (typeof msg !== 'object' || msg === null) return false
+  if (msg && typeof msg.id === 'number' && typeof msg.method === 'string') return true
+  return false
+}
+
+function isExtensionMessage(msg) {
+  if (typeof msg !== 'object' || msg === null) return false
+  if (msg && msg.method === 'forwardCDPEvent') return true
+  if (msg && msg.method === 'Grais.extensionHeartbeat') return true
+  if (msg && typeof msg.id === 'number' && (msg.result !== undefined || msg.error !== undefined)) return true
+  return false
+}
+
+function notifyControllers(state, message) {
+  for (const controller of state.controllerSockets) {
+    if (controller !== state.extensionSocket) {
+      safeSend(controller, message)
+    }
+  }
+}
+
+function throwErrorToController(socket, id, error) {
+  if (typeof id !== 'number') return
+  safeSend(socket, { id, error })
+}
+
+function safeSend(socket, payload) {
+  if (!socket || socket.readyState !== socket.OPEN) return
+  try {
+    socket.send(JSON.stringify(payload))
+  } catch {
+    // best effort
+  }
+}
+
+function startRelayHeartbeatWatchdog(state) {
+  if (state.relayHeartbeatWatchdog) return
+  state.relayHeartbeatWatchdog = setInterval(() => {
+    if (!state.extensionSocket || state.extensionSocket.readyState !== state.extensionSocket.OPEN) return
+    if (!state.extensionLastSeenTs) return
+    const elapsed = Date.now() - state.extensionLastSeenTs
+    if (elapsed > RELAY_HEARTBEAT_TIMEOUT_MS) {
+      state.extensionSocket.close(1001, 'heartbeat timeout')
+    }
+  }, RELAY_HEARTBEAT_INTERVAL_MS)
+}
+
+function stopRelayHeartbeatWatchdog(state) {
+  if (!state.relayHeartbeatWatchdog) return
+  clearInterval(state.relayHeartbeatWatchdog)
+  state.relayHeartbeatWatchdog = null
+}
+
+function shutdown(exitCode = 0, message) {
+  if (shuttingDown) return
+  shuttingDown = true
+  if (message) {
+    console.log(message)
+  }
+  stopAutoShutdownTimer()
+  if (autoShutdownTimer) {
+    clearTimeout(autoShutdownTimer)
+    autoShutdownTimer = null
+  }
+
+  for (const state of portStates.values()) {
+    failPending(state, 'Relay shutting down')
+    if (state.extensionSocket && state.extensionSocket.readyState === state.extensionSocket.OPEN) {
+      state.extensionSocket.close(1001, 'relay shutdown')
+    }
+    for (const controller of state.controllerSockets) {
+      if (controller !== state.extensionSocket) {
+        controller.close(1001, 'relay shutdown')
+      }
+    }
+    clearQueue(state)
+    stopRelayHeartbeatWatchdog(state)
+    state.wss.close()
+    if (state.httpServer) {
+      state.httpServer.close()
+    }
+  }
+
+  setTimeout(() => {
+    releaseRelayLock()
+    process.exit(exitCode)
+  }, 50)
+}
+
+function stopAutoShutdownTimer() {
+  if (!autoShutdownTimer) return
+  clearTimeout(autoShutdownTimer)
+  autoShutdownTimer = null
+}
+
+function parsePortOrNull(value) {
+  const parsed = Number.parseInt(String(value || ''), 10)
+  if (!Number.isFinite(parsed) || parsed < 1 || parsed > 65535) return null
+  return parsed
+}
+
+function parsePortList(raw, fallback) {
+  if (raw == null || raw === '') return fallback.slice()
+  const values = String(raw).split(',')
+  const ports = []
+  for (const value of values) {
+    const parsed = parsePortOrNull(value)
+    if (Number.isInteger(parsed)) ports.push(parsed)
+  }
+  return ports.length > 0 ? ports : fallback.slice()
+}
+
+function getRelayLockPath(hostname) {
   const safeHost = String(hostname || DEFAULT_HOST).replace(/[^a-zA-Z0-9.-]/g, '_')
-  return path.join(os.tmpdir(), `grais-debugger-relay-${safeHost}-${relayPort}.lock`)
+  return path.join(os.tmpdir(), `grais-debugger-relay-${safeHost}.lock`)
 }
 
 function isProcessAlive(pid) {
@@ -303,7 +887,7 @@ function acquireRelayLock(filePath) {
     tries += 1
     try {
       const fd = fs.openSync(filePath, 'wx')
-      fs.writeFileSync(fd, JSON.stringify({ pid: process.pid, startedAt: Date.now(), host, port }))
+      fs.writeFileSync(fd, JSON.stringify({ pid: process.pid, startedAt: Date.now(), host }))
       return fd
     } catch (error) {
       if (error.code !== 'EEXIST') throw error
@@ -311,18 +895,16 @@ function acquireRelayLock(filePath) {
       const existing = readRelayLockFile(filePath)
       const pid = Number.parseInt(String(existing?.pid || ''), 10)
       if (Number.isInteger(pid) && isProcessAlive(pid)) {
-        throw new Error(`Another relay process is already running on ${host}:${port} (pid ${pid})`)
+        throw new Error(`Another relay process is already running on host ${host} (pid ${pid})`)
       }
-
       try {
         fs.unlinkSync(filePath)
       } catch {
-        // Keep trying with existing lock removed.
+        // best effort
       }
     }
   }
-
-  throw new Error(`Failed to acquire relay lock for ${host}:${port}`)
+  throw new Error(`Failed to acquire relay lock for host ${host}`)
 }
 
 function releaseRelayLock() {
@@ -344,304 +926,25 @@ function releaseRelayLock() {
   }
 }
 
-function queueControllerCommand(forward, socket) {
-  while (queuedControllerRequests.length >= MAX_QUEUED_CONTROLLER_COMMANDS) {
-    const overflow = queuedControllerRequests.shift()
-    if (!overflow) break
-    clearTimeout(overflow.timer)
-    pendingByRelayId.delete(overflow.relayId)
-    throwErrorToController(overflow.socket, overflow.requestId, 'Relay queue full; command dropped')
-  }
-
-  const relayId = nextRelayId
-  nextRelayId += 1
-  const payload = {
-    id: relayId,
-    method: forward.method,
-    params: forward.params,
-  }
-
-  const queueEntry = {
-    relayId,
-    socket,
-    requestId: forward.id,
-    payload,
-    timer: setTimeout(() => {
-      dequeueControllerCommand(relayId, `Relay has no active extension connection for ${QUEUED_REQUEST_TIMEOUT_MS}ms`)
-    }, QUEUED_REQUEST_TIMEOUT_MS),
-  }
-
-  queuedControllerRequests.push(queueEntry)
-  pendingByRelayId.set(relayId, {
-    socket,
-    requestId: forward.id,
-    timer: queueEntry.timer,
-  })
-
-  notifyControllers({
-    method: 'relayEvent',
-    params: {
-      type: 'extension_offline_queue',
-      queue: queuedControllerRequests.length,
-      requestId: forward.id,
-    },
-  })
-}
-
-function dequeueControllerCommand(relayId, reason) {
-  const index = queuedControllerRequests.findIndex((entry) => entry.relayId === relayId)
-  if (index === -1) return
-  const entry = queuedControllerRequests[index]
-  queuedControllerRequests.splice(index, 1)
-  clearTimeout(entry.timer)
-  const pending = pendingByRelayId.get(relayId)
-  if (pending) {
-    clearTimeout(pending.timer)
-    pendingByRelayId.delete(relayId)
-  }
-  throwErrorToController(entry.socket, entry.requestId, reason)
-}
-
-function flushQueuedControllerCommands() {
-  if (!extensionSocket || extensionSocket.readyState !== extensionSocket.OPEN) {
-    return
-  }
-
-  while (queuedControllerRequests.length > 0) {
-    const entry = queuedControllerRequests.shift()
-    if (!entry) return
-    const pending = pendingByRelayId.get(entry.relayId)
-    if (!pending) {
-      clearTimeout(entry.timer)
-      continue
-    }
-
-    clearTimeout(pending.timer)
-    pendingByRelayId.set(entry.relayId, {
-      ...pending,
-      timer: setTimeout(() => {
-        pendingByRelayId.delete(entry.relayId)
-        throwErrorToController(entry.socket, entry.requestId, `Relay timed out after ${requestTimeoutMs}ms`)
-      }, requestTimeoutMs),
-    })
-    const replayPending = pendingByRelayId.get(entry.relayId)
-    if (!replayPending) {
-      clearTimeout(entry.timer)
-      continue
-    }
-
-    try {
-      sendToExtension(entry.payload)
-    } catch (error) {
-      clearTimeout(replayPending.timer)
-      clearTimeout(entry.timer)
-      pendingByRelayId.delete(entry.relayId)
-      throwErrorToController(
-        entry.socket,
-        entry.requestId,
-        `Failed to dispatch queued command: ${error instanceof Error ? error.message : String(error)}`,
-      )
-    }
-  }
-}
-
-function forwardControllerToExtension(forward, socket) {
-  const relayId = nextRelayId
-  nextRelayId += 1
-  console.log('[Relay] forwarding to extension', {
-    relayId,
-    requestId: forward.id,
-    method: forward.method,
-  })
-  const payload = {
-    id: relayId,
-    method: forward.method,
-    params: forward.params,
-  }
-
-  pendingByRelayId.set(relayId, {
-    socket,
-    requestId: forward.id,
-    timer: setTimeout(() => {
-      pendingByRelayId.delete(relayId)
-      throwErrorToController(socket, forward.id, `Relay timed out after ${requestTimeoutMs}ms`)
-    }, requestTimeoutMs),
-  })
-
-  const pending = pendingByRelayId.get(relayId)
-  if (!pending) return
-  try {
-    sendToExtension(payload)
-  } catch (error) {
-    clearTimeout(pending.timer)
-    pendingByRelayId.delete(relayId)
-    if (!extensionSocket || extensionSocket.readyState !== extensionSocket.OPEN) {
-      queueControllerCommand(forward, socket)
-      return
-    }
-    throwErrorToController(
-      socket,
-      forward.id,
-      `Failed to dispatch command: ${error instanceof Error ? error.message : String(error)}`,
-    )
-  }
-}
-
-function sendToExtension(payload) {
-  if (!extensionSocket || extensionSocket.readyState !== extensionSocket.OPEN) {
-    throw new Error('Relay has no active extension connection')
-  }
-  console.log('[Relay] sendToExtension', {
-    id: payload?.id,
-    method: payload?.method,
-    hasParams: Boolean(payload?.params),
-  })
-  extensionSocket.send(JSON.stringify(payload))
-}
-
-function handleExtensionTabState(params) {
-  if (!params || typeof params !== 'object') return
-
-  const event = String(params.event || '').toLowerCase()
-  const rawTabId = Number.parseInt(String(params.tabId || ''), 10)
-  if (!Number.isInteger(rawTabId)) return
-
-  if (event === 'detached' || event === 'removed' || event === 'cleared') {
-    attachedTabsById.delete(rawTabId)
-    return
-  }
-
-  if (event !== 'attached') return
-
-  const tabId = rawTabId
-  const targetId = typeof params.targetId === 'string' && params.targetId.trim() ? params.targetId.trim() : null
-  const title = typeof params.title === 'string' && params.title.trim() ? params.title.trim() : null
-  const rawUrl = typeof params.url === 'string' && params.url.trim() ? params.url.trim() : null
-  const current = attachedTabsById.get(tabId)
-  const now = Date.now()
-
-  attachedTabsById.set(tabId, {
-    tabId,
-    targetId,
-    title,
-    url: rawUrl,
-    attachedAtMs: current?.attachedAtMs || now,
-    lastSeenAtMs: now,
-  })
-}
-
-function getAttachedTabsSnapshot() {
-  const snapshot = [...attachedTabsById.values()].map((entry) => ({
-    tabId: entry.tabId,
-    targetId: entry.targetId,
-    title: entry.title,
-    url: entry.url,
-    attachedAtMs: entry.attachedAtMs,
-    lastSeenAtMs: entry.lastSeenAtMs,
-  }))
-
-  snapshot.sort((a, b) => a.tabId - b.tabId)
-  return snapshot
-}
-
-function failPending(socket, reason) {
-  for (const [relayId, pending] of pendingByRelayId) {
-    if (!socket || pending.socket === socket) {
-      clearTimeout(pending.timer)
-      pendingByRelayId.delete(relayId)
-      throwErrorToController(pending.socket, pending.requestId, reason)
-    }
-  }
-}
-
-function toRelayPayload(msg) {
-  if (typeof msg !== 'object' || msg === null) return null
-  if (typeof msg.id !== 'number') return null
-  if (typeof msg.method !== 'string') return null
-
-  const { id, method, params } = msg
-  if (!method) return null
-
+function sanitizeTabMeta(value) {
+  if (!value || typeof value !== 'object') return null
+  const url = typeof value.url === 'string' ? value.url : null
+  const title = typeof value.title === 'string' ? value.title : null
+  const tabId = Number.isInteger(Number(value.tabId)) ? Number(value.tabId) : null
+  const windowId = Number.isInteger(Number(value.windowId)) ? Number(value.windowId) : null
   return {
-    id,
-    method,
-    params,
+    tabId,
+    url,
+    title,
+    windowId,
   }
 }
 
-function isControllerMessage(msg) {
-  if (typeof msg !== 'object' || msg === null) return false
-  if (msg && typeof msg.id === 'number' && typeof msg.method === 'string') return true
-  return false
-}
-
-function isExtensionMessage(msg) {
-  if (typeof msg !== 'object' || msg === null) return false
-  if (msg && msg.method === 'forwardCDPEvent') return true
-  if (msg && msg.method === 'Grais.extensionHeartbeat') return true
-  if (msg && msg.method === 'Grais.extensionTabState') return true
-  if (msg && typeof msg.id === 'number' && (msg.result !== undefined || msg.error !== undefined)) return true
-  return false
-}
-
-function notifyControllers(message) {
-  for (const controller of controllerSockets) {
-    if (controller !== extensionSocket) {
-      safeSend(controller, message)
-    }
-  }
-}
-
-function throwErrorToController(socket, id, error) {
-  if (typeof id !== 'number') return
-  safeSend(socket, { id, error })
-}
-
-function safeSend(socket, payload) {
-  if (!socket || socket.readyState !== socket.OPEN) return
-  try {
-    socket.send(JSON.stringify(payload))
-  } catch {
-    // Best effort.
-  }
-}
-
-function startRelayHeartbeatWatchdog() {
-  if (relayHeartbeatWatchdog) {
-    return
-  }
-
-  relayHeartbeatWatchdog = setInterval(() => {
-    if (!extensionSocket || extensionSocket.readyState !== extensionSocket.OPEN) return
-    if (!extensionLastSeenTs) return
-
-    const elapsed = Date.now() - extensionLastSeenTs
-    if (elapsed > RELAY_HEARTBEAT_TIMEOUT_MS) {
-      extensionSocket.close(1001, 'heartbeat timeout')
-    }
-  }, RELAY_HEARTBEAT_INTERVAL_MS)
-}
-
-function stopRelayHeartbeatWatchdog() {
-  if (!relayHeartbeatWatchdog) return
-  clearInterval(relayHeartbeatWatchdog)
-  relayHeartbeatWatchdog = null
-}
-
-function stopAutoShutdownTimer() {
-  if (!autoShutdownTimer) return
-  clearTimeout(autoShutdownTimer)
-  autoShutdownTimer = null
-}
-
-function shutdown(exitCode = 0) {
-  if (shuttingDown) return
-  shuttingDown = true
-  stopAutoShutdownTimer()
-  releaseRelayLock()
-  stopRelayHeartbeatWatchdog()
-  wss.clients.forEach((socket) => socket.close())
-  httpServer.close(() => process.exit(exitCode))
+function cleanTabMeta(value) {
+  if (!value) return null
+  const metadata = sanitizeTabMeta(value)
+  if (!metadata || metadata.tabId === null) return null
+  return metadata
 }
 
 function parsePositiveInt(value, fallback, label) {
@@ -660,40 +963,19 @@ function parseNonNegativeInt(value, fallback, label) {
   return parsed
 }
 
-function clampPort(value, fallback) {
-  const parsed = Number.parseInt(String(value || ''), 10)
-  if (!Number.isFinite(parsed) || parsed < 1 || parsed > 65535) return fallback
-  return parsed
-}
-
 function parseArgs(argv) {
   const out = {}
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i]
     if (arg === '--help' || arg === '-h') out.help = true
-    else if (arg === '--port' && argv[i + 1]) {
-      out.port = argv[++i]
-    } else if (arg === '--host' && argv[i + 1]) {
-      out.host = argv[++i]
-    } else if (arg === '--timeout' && argv[i + 1]) {
-      out.timeout = argv[++i]
-    } else if (arg === '--max-runtime-ms' && argv[i + 1]) {
-      out.maxRuntimeMs = argv[++i]
-    }
+    else if (arg === '--port' && argv[i + 1]) out.port = argv[++i]
+    else if (arg === '--ports' && argv[i + 1]) out.ports = argv[++i]
+    else if (arg === '--host' && argv[i + 1]) out.host = argv[++i]
+    else if (arg === '--timeout' && argv[i + 1]) out.timeout = argv[++i]
+    else if (arg === '--max-runtime-ms' && argv[i + 1]) out.maxRuntimeMs = argv[++i]
   }
   return out
 }
-
-httpServer.listen(port, host, () => {
-  console.log(`Grais Debugger relay listening on ws://${host}:${port}/extension`)
-  console.log(`Health endpoint: http://${host}:${port}/`)
-  if (maxRuntimeMs > 0) {
-    autoShutdownTimer = setTimeout(() => {
-      console.log(`Auto-stopping relay after max runtime (${maxRuntimeMs}ms)`)
-      shutdown(0)
-    }, maxRuntimeMs)
-  }
-})
 
 process.on('SIGINT', () => {
   shutdown(0)

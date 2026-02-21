@@ -9,11 +9,30 @@ Use this skill to attach to a chosen Chrome tab through the bundled Grais Debugg
 
 ## Quick start
 
-1. Install dependencies and start relay
+Use these defaults for the active relay endpoint:
+
+```bash
+export GRAIS_RELAY_HOST=127.0.0.1
+export GRAIS_RELAY_PORT=18793
+export GRAIS_ATTACH_TIMEOUT_MS=120000
+```
+
+1. Wire canonical skill path
 
    ```bash
-   npm install
-   npm run relay:start
+   npm run codex:install
+   ```
+
+2. Install dependencies and start relay
+
+   ```bash
+   npm run relay:start -- --status-timeout-ms 3000
+   ```
+
+   Or pin host/port explicitly:
+
+   ```bash
+   npm run relay:start -- --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "${GRAIS_RELAY_PORT:-18793}" --status-timeout-ms 3000
    ```
 
    `relay:start` auto-stops after 2 hours by default. Override if needed:
@@ -23,7 +42,7 @@ Use this skill to attach to a chosen Chrome tab through the bundled Grais Debugg
    node scripts/relay-manager.js start --auto-stop-ms 0
    ```
 
-2. Load extension from the `extension/` subfolder in Chrome
+3. Load extension from the `extension/` subfolder in Chrome
 
    - `chrome://extensions`
    - Enable developer mode
@@ -48,16 +67,17 @@ Use this skill to attach to a chosen Chrome tab through the bundled Grais Debugg
 4. Check readiness and attach state
 
    ```bash
-   node scripts/read-active-tab.js --check --wait-for-attach --attach-timeout-ms 120000
+   node scripts/read-active-tab.js --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "${GRAIS_RELAY_PORT:-18793}" --check --wait-for-attach --attach-timeout-ms "${GRAIS_ATTACH_TIMEOUT_MS:-120000}"
    ```
 
    Continue only if this command returns success.
 
-   For multi-relay deployments, verify all ports at once:
+### Per-tab relay port behavior
+- If you run one relay process with multiple ports, the extension can manage different relay ports per attached tab.
+- A tab with no saved relay-port mapping uses the global default (`GRAIS_RELAY_PORT`, default `18793`).
+- After a successful attach, the extension saves that tab’s mapped relay port and reuses it automatically.
+- Closed tabs have their mapping removed automatically.
 
-   ```bash
-   npm run relay:status -- --scan-ports 18792,18793,18794,18795,18796,18797,18798,18799,18800,18801,18802
-   ```
 
 ## Mandatory behavior for agents
 - Use fixed commands from this repo. Do not try to "discover" alternate script names.
@@ -66,8 +86,12 @@ Use this skill to attach to a chosen Chrome tab through the bundled Grais Debugg
   - `npm run relay:status`
   - `npm run relay:stop`
   - `node scripts/read-active-tab.js`
+- For relay health checks, always use explicit timeouts to avoid hangs:
+  - `npm run relay:status -- --status-timeout-ms 3000`
+  - `curl --max-time 3 -sS "http://${GRAIS_RELAY_HOST:-127.0.0.1}:${GRAIS_RELAY_PORT:-18793}/status"`
+  - `npm run relay:status -- --all --status-timeout-ms 3000`
 - After `relay:start`, pause and ask the human to attach the target tab before any read.
-- Run `node scripts/read-active-tab.js --check --wait-for-attach --attach-timeout-ms 120000` before reads and proceed only when it succeeds.
+- Run `node scripts/read-active-tab.js --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "${GRAIS_RELAY_PORT:-18793}" --check --wait-for-attach --attach-timeout-ms "${GRAIS_ATTACH_TIMEOUT_MS:-120000}"` before reads and proceed only when it succeeds.
 - Do not stop/restart relay during the task unless the human requests it or recovery is explicitly required.
 
 5. Read structured tab payload
@@ -86,6 +110,7 @@ Use this skill to attach to a chosen Chrome tab through the bundled Grais Debugg
 
 - `scripts/read-active-tab.js` default extraction: `url`, `title`, `text`, `links`, `metaDescription`.
 - `Runtime.evaluate` expression mode with `--expression`.
+- Screenshot capture mode via `--screenshot` (optional `--screenshot-full-page`, `--screenshot-path`).
 - Preset extraction for WhatsApp and generic chat-auditing with regex filters.
 - Attach-state polling with `--check --wait-for-attach`.
 
@@ -98,11 +123,14 @@ Use this skill to attach to a chosen Chrome tab through the bundled Grais Debugg
 ## Common command examples
 
 ```bash
-node scripts/read-active-tab.js --pretty false
-node scripts/read-active-tab.js --expression "document.documentElement.outerHTML"
-node scripts/read-active-tab.js --preset whatsapp-messages --max-messages 200 --selector "#main"
+node scripts/read-active-tab.js --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "${GRAIS_RELAY_PORT:-18793}" --pretty false
+node scripts/read-active-tab.js --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "${GRAIS_RELAY_PORT:-18793}" --expression "document.documentElement.outerHTML"
+node scripts/read-active-tab.js --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "${GRAIS_RELAY_PORT:-18793}" --screenshot --screenshot-full-page --screenshot-path "./tmp/page.png"
+node scripts/read-active-tab.js --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "${GRAIS_RELAY_PORT:-18793}" --preset whatsapp-messages --max-messages 200 --selector "#main"
 node scripts/read-active-tab.js --preset chat-audit --selector "body" --message-regex ".*"
 ```
+
+All successful commands return a `source` object with `relayHost`, `relayPort`, `relayStatusUrl`, and `relayWebSocketUrl`.
 
 ## Recommended flow with agents
 

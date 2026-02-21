@@ -1,4 +1,4 @@
-const DEFAULT_PORT = 18792
+const DEFAULT_PORT = 18793
 
 function setStatus(kind, message) {
   const status = document.getElementById('status')
