@@ -101,6 +101,7 @@ export GRAIS_ATTACH_TIMEOUT_MS=120000
 - For concurrent/multi-agent usage, always pass `--tab-id <tabId>` on check/read commands so each agent gets a tab lease.
 - Do not stop/restart relay during the task unless the human requests it or recovery is explicitly required.
 - Do not restart relay only because code was updated locally; updates are applied on next explicit human-approved restart.
+- If the page shows human-verification gates (for example "Are you human?" or CAPTCHA), stop immediately, alert the human with [$attention-please](/Users/mathiasasberg/.codex/skills/public/attention-please/SKILL.md), and wait for explicit human confirmation before continuing.
 
 5. Read structured tab payload
 

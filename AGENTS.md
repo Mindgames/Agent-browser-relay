@@ -111,6 +111,7 @@ This refreshes sparse state and restores all missing tracked directories in the 
 - Agent must resolve `tabId` from relay status (`/status` or `npm run relay:status -- --all`) and explicitly target that tab.
 - Agent must not stop/restart relay during a task unless the human explicitly asks for restart or a hard failure requires it.
 - Agent must not restart relay only because local code changed. Code updates are picked up only on explicit human-approved restart.
+- If the page shows human-verification gates (for example "Are you human?" or CAPTCHA), agent must stop immediately, alert the human with [$attention-please](/Users/mathiasasberg/.codex/skills/public/attention-please/SKILL.md), and wait for explicit human confirmation before continuing.
 - If canonical scripts are missing, fail fast with a concrete error and stop; do not pivot to a different pipeline.
 
 Before running reads, also verify relay health:
