@@ -9,6 +9,7 @@ const RELAY_RECONNECT_BASE_DELAY_MS = 500
 const RELAY_RECONNECT_MAX_DELAY_MS = 10000
 const FORWARD_COMMAND_TIMEOUT_MS = 10000
 const DEBUG_LOG = true
+const ALLOW_FOREGROUND_ACTIVATE_TARGET = false
 const RELAY_PORT_BY_TAB_KEY = 'relayPortByTab'
 
 const BADGE = {
@@ -1050,9 +1051,13 @@ async function handleForwardCdpCommand(msg) {
 
     if (method === 'Target.activateTarget') {
       const target = typeof params?.targetId === 'string' ? params.targetId : ''
-      dbg('handleForwardCdpCommand.targetActivate', { target })
+      dbg('handleForwardCdpCommand.targetActivate', {
+        target,
+        allowForeground: ALLOW_FOREGROUND_ACTIVATE_TARGET,
+      })
       const toActivate = target ? getTabByTargetId(target) : tabId
       if (!toActivate) return {}
+      if (!ALLOW_FOREGROUND_ACTIVATE_TARGET) return {}
       const tab = await chrome.tabs.get(toActivate).catch(() => null)
       if (!tab) return {}
       if (tab.windowId) {
