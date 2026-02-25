@@ -25,6 +25,44 @@ function tabLabel(item) {
   return parts.join(' — ')
 }
 
+async function copyToClipboard(value) {
+  const text = String(value || '').trim()
+  if (!text) {
+    throw new Error('Missing tab ID')
+  }
+  if (navigator?.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text)
+    return
+  }
+
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.setAttribute('readonly', 'true')
+  textarea.style.position = 'fixed'
+  textarea.style.opacity = '0'
+  textarea.style.pointerEvents = 'none'
+  document.body.appendChild(textarea)
+  textarea.select()
+  const copied = document.execCommand('copy')
+  document.body.removeChild(textarea)
+  if (!copied) {
+    throw new Error('Clipboard write failed')
+  }
+}
+
+async function onCopyTabId(tabId) {
+  if (!Number.isInteger(tabId)) {
+    setStatus('Invalid tab ID', 'err')
+    return
+  }
+  try {
+    await copyToClipboard(String(tabId))
+    setStatus(`Copied Tab ID ${tabId}`, 'ok')
+  } catch (err) {
+    setStatus(err?.message || `Failed to copy Tab ID ${tabId}`, 'err')
+  }
+}
+
 async function sendMessage(message) {
   const response = await chrome.runtime.sendMessage(message)
   if (!response) {
@@ -55,10 +93,29 @@ function renderConnectedTabs(state) {
 
   for (const item of entries) {
     const li = document.createElement('li')
+    const row = document.createElement('div')
+    row.className = 'connectionRow'
+    const text = document.createElement('span')
+    text.className = 'connectionText'
     const connected = item.state === 'connected' ? 'connected' : item.state
     const override = Number.isInteger(item.port) ? `${item.port}` : `${state.defaultPort} (default)`
     const portText = `Relay ${override}`
-    li.textContent = `${connected}: ${tabLabel(item)} (${portText})`
+    text.textContent = `${connected}: ${tabLabel(item)} (${portText})`
+    row.appendChild(text)
+
+    if (Number.isInteger(item.tabId)) {
+      const copyButton = document.createElement('button')
+      copyButton.type = 'button'
+      copyButton.className = 'secondary copyTabId'
+      copyButton.textContent = 'Copy ID'
+      copyButton.setAttribute('aria-label', `Copy tab ID ${item.tabId}`)
+      copyButton.addEventListener('click', () => {
+        void onCopyTabId(item.tabId)
+      })
+      row.appendChild(copyButton)
+    }
+
+    li.appendChild(row)
     connectedListEl.appendChild(li)
   }
 }
