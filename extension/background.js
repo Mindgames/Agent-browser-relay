@@ -163,6 +163,27 @@ function setBadge(tabId, kind) {
   void chrome.action.setBadgeTextColor({ tabId, color: '#FFFFFF' }).catch(() => {})
 }
 
+function refreshTabIndicator(tabId) {
+  const normalizedTabId = normalizeTabId(tabId)
+  if (!Number.isInteger(normalizedTabId)) return
+  const state = tabs.get(normalizedTabId)?.state || null
+  if (state === 'connected') {
+    setBadge(normalizedTabId, 'on')
+    void chrome.action.setTitle({
+      tabId: normalizedTabId,
+      title: 'Grais Debugger Browser Relay: attached (click to detach)',
+    })
+    return
+  }
+  if (state === 'connecting') {
+    setBadge(normalizedTabId, 'connecting')
+    void chrome.action.setTitle({
+      tabId: normalizedTabId,
+      title: 'Grais Debugger Browser Relay: attaching to active tab…',
+    })
+  }
+}
+
 function sleep(ms) {
   return new Promise((resolve) => {
     setTimeout(resolve, ms)
@@ -489,14 +510,17 @@ function stopRelayHeartbeat() {
 
 async function sendRelayHeartbeat() {
   if (!relayWs || relayWs.readyState !== WebSocket.OPEN) return
+  const activeTab = await buildActiveHeartbeatTab()
+  const attachedTabs = await buildAttachedHeartbeatTabs()
+  refreshTabIndicator(activeTab?.tabId)
   const payload = {
     method: 'Grais.extensionHeartbeat',
     ts: Date.now(),
     relayPort: currentRelayPort,
     state: userAttachmentEnabled ? 'attached' : 'detached',
     status: userAttachmentEnabled ? 'ON' : 'OFF',
-    activeTab: await buildActiveHeartbeatTab(),
-    attachedTabs: await buildAttachedHeartbeatTabs(),
+    activeTab,
+    attachedTabs,
   }
   sendToRelay(payload)
 }
@@ -979,12 +1003,16 @@ async function handleForwardCdpCommand(msg) {
     }
 
     const targetId = typeof params?.targetId === 'string' ? params.targetId : undefined
-    let tabId = resolveTabIdByCommand(sessionId, targetId)
-    if (!tabId && requestedTabId !== null) {
+    let tabId = null
+
+    if (requestedTabId !== null) {
+      // Lease-bound commands must always execute on the explicitly requested tab.
       tabId = requestedTabId
       if (!tabs.has(tabId) || tabs.get(tabId)?.state !== 'connected') {
         await ensureActiveTabAttachedFromRelay({ force: true, tabId })
       }
+    } else {
+      tabId = resolveTabIdByCommand(sessionId, targetId)
     }
 
     if (!tabId) {
@@ -1172,13 +1200,15 @@ function onDebuggerDetach(source, reason) {
   scheduleAutoAttachFromDetach(reason, tabId)
 }
 
-chrome.tabs.onActivated.addListener(() => {
+chrome.tabs.onActivated.addListener((activeInfo) => {
+  refreshTabIndicator(activeInfo?.tabId)
   scheduleActiveTabReattachFromEvent()
 })
 
 chrome.tabs.onUpdated.addListener((_, changeInfo, tab) => {
   if (!tab?.active) return
   if (changeInfo.status !== 'complete') return
+  refreshTabIndicator(tab.id)
   scheduleActiveTabReattachFromEvent()
 })
 
