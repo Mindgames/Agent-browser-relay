@@ -110,6 +110,16 @@ function getPortState(relayPort) {
   return portStates.get(relayPort) || null
 }
 
+function countConnectedControllerClients(state) {
+  let count = 0
+  for (const socket of state.controllerSockets) {
+    if (!socket || socket === state.extensionSocket) continue
+    if (socket.readyState !== socket.OPEN) continue
+    count += 1
+  }
+  return count
+}
+
 function summarizePortState(state) {
   const extensionConnected = Boolean(state.extensionSocket && state.extensionSocket.readyState === state.extensionSocket.OPEN)
   const extensionLastSeenAgoMs = state.extensionLastSeenTs ? Date.now() - state.extensionLastSeenTs : null
@@ -119,7 +129,7 @@ function summarizePortState(state) {
     extensionConnected,
     extensionLastSeenAgoMs,
     queuedControllerCommands: state.queuedControllerRequests.length,
-    connectedControllerClients: state.controllerSockets.size,
+    connectedControllerClients: countConnectedControllerClients(state),
     pendingCommands: state.pendingByRelayId.size,
     sessionCount: state.sessionsById.size,
     leasedTabCount: state.tabLeases.size,
@@ -141,7 +151,7 @@ function getSinglePortStatus(state) {
     extensionConnected: Boolean(state.extensionSocket && state.extensionSocket.readyState === state.extensionSocket.OPEN),
     extensionLastSeenAgoMs: state.extensionLastSeenTs ? Date.now() - state.extensionLastSeenTs : null,
     queuedControllerCommands: state.queuedControllerRequests.length,
-    connectedControllerClients: state.controllerSockets.size,
+    connectedControllerClients: countConnectedControllerClients(state),
     pendingCommands: state.pendingByRelayId.size,
     sessionCount: state.sessionsById.size,
     leasedTabCount: state.tabLeases.size,
@@ -592,7 +602,7 @@ function handleWebSocketConnection(socket, state) {
     if (entry.role === 'unknown') {
       if (isControllerMessage(msg)) {
         entry.role = 'controller'
-      } else if (isExtensionMessage(msg) || msg?.method === 'ping') {
+      } else if (isExtensionMessage(msg)) {
         entry.role = 'extension'
       } else {
         return
@@ -1188,6 +1198,7 @@ function toRelayPayload(msg) {
 
 function isControllerMessage(msg) {
   if (typeof msg !== 'object' || msg === null) return false
+  if (msg && msg.method === 'ping') return true
   if (msg && typeof msg.id === 'number' && typeof msg.method === 'string') return true
   return false
 }
