@@ -9,6 +9,7 @@ const savePortButton = document.getElementById('savePort')
 const clearPortButton = document.getElementById('clearPort')
 const attachButton = document.getElementById('attach')
 const refreshButton = document.getElementById('refresh')
+const allowCreateTargetToggle = document.getElementById('allowCreateTarget')
 
 function setStatus(message, kind = 'ok') {
   if (!statusEl) return
@@ -126,6 +127,9 @@ function renderAttachmentControl(state) {
   activeTabEl.textContent = state.activeTab ? tabLabel(state.activeTab) : `Current tab: ${state.requestedTabId || 'unknown'}`
   defaultPortEl.textContent = `default ${state.defaultPort}`
   connectedPortEl.textContent = `active relay ${state.relayPortConnected}`
+  if (allowCreateTargetToggle) {
+    allowCreateTargetToggle.checked = Boolean(state.allowTargetCreate)
+  }
 
   const preferredPort = Number.isInteger(state.mappedPort)
     ? state.mappedPort
@@ -211,9 +215,32 @@ async function onToggleAttach() {
   }
 }
 
+async function onToggleAllowCreateTarget() {
+  if (!allowCreateTargetToggle) return
+  const enabled = allowCreateTargetToggle.checked === true
+  try {
+    const tabId = await getCurrentActiveTabId()
+    const response = await sendMessage({
+      type: 'grais.popup.setTargetCreateEnabled',
+      enabled,
+      tabId,
+    })
+    renderAttachmentControl(response)
+    renderConnectedTabs(response)
+    setStatus(
+      response.allowTargetCreate ? 'Agent new-tab spawn enabled' : 'Agent new-tab spawn disabled',
+      'ok',
+    )
+  } catch (err) {
+    allowCreateTargetToggle.checked = !enabled
+    setStatus(err.message || 'Failed to update setting', 'err')
+  }
+}
+
 refreshButton?.addEventListener('click', () => void refresh())
 savePortButton?.addEventListener('click', () => void onSavePort())
 clearPortButton?.addEventListener('click', () => void onClearPort())
 attachButton?.addEventListener('click', () => void onToggleAttach())
+allowCreateTargetToggle?.addEventListener('change', () => void onToggleAllowCreateTarget())
 
 void refresh()
