@@ -66,9 +66,9 @@ function initializePorts(ports) {
       .then(() => {
         const portsLabel = sortedPorts.join(', ')
         if (sortedPorts.length > 1) {
-          console.log(`Grais Debugger relay listening on ports: ${portsLabel} (shared relay hub)`)
+          console.log(`Agent Browser Relay listening on ports: ${portsLabel} (shared relay hub)`)
         } else {
-          console.log(`Grais Debugger relay listening on ws://${host}:${sortedPorts[0]}/extension`)
+          console.log(`Agent Browser Relay listening on ws://${host}:${sortedPorts[0]}/extension`)
         }
         console.log(`Health endpoint: http://${host}:${sortedPorts[0]}/`)
         if (maxRuntimeMs > 0) {

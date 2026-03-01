@@ -4,9 +4,31 @@ set -euo pipefail
 SKILL_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$SKILL_ROOT"
 
-RELAY_HOST="${GRAIS_RELAY_HOST:-127.0.0.1}"
-RELAY_PORT="${GRAIS_RELAY_PORT:-18793}"
-ATTACH_TIMEOUT_MS="${GRAIS_ATTACH_TIMEOUT_MS:-120000}"
+RELAY_HOST="127.0.0.1"
+RELAY_PORT="18793"
+ATTACH_TIMEOUT_MS="120000"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --host)
+      RELAY_HOST="${2:-$RELAY_HOST}"
+      shift 2
+      ;;
+    --port)
+      RELAY_PORT="${2:-$RELAY_PORT}"
+      shift 2
+      ;;
+    --attach-timeout-ms)
+      ATTACH_TIMEOUT_MS="${2:-$ATTACH_TIMEOUT_MS}"
+      shift 2
+      ;;
+    *)
+      echo "[preflight] Unknown argument: $1" >&2
+      echo "[preflight] Usage: ./scripts/preflight.sh [--host 127.0.0.1] [--port 18793] [--attach-timeout-ms 120000]" >&2
+      exit 1
+      ;;
+  esac
+done
 RELAY_STATUS_URL="http://${RELAY_HOST}:${RELAY_PORT}/status"
 
 echo "[preflight] checking relay status: ${RELAY_STATUS_URL}"

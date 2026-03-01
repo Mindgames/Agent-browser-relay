@@ -5,8 +5,8 @@ const path = require('node:path')
 const http = require('node:http')
 const { spawn } = require('node:child_process')
 
-const DEFAULT_HOST = String(process.env.GRAIS_RELAY_HOST || '127.0.0.1').trim() || '127.0.0.1'
-const DEFAULT_PORT = parsePort(process.env.GRAIS_RELAY_PORT, 18793)
+const DEFAULT_HOST = '127.0.0.1'
+const DEFAULT_PORT = 18793
 const DEFAULT_TIMEOUT_MS = 12000
 const DEFAULT_START_TIMEOUT_MS = 10000
 const DEFAULT_START_POLL_MS = 250
@@ -478,7 +478,8 @@ function parseArgs(argv) {
 
 function printUsage() {
   console.log(`Usage:
-  Relay manager reads GRAIS_RELAY_HOST / GRAIS_RELAY_PORT by default.
+  Relay manager uses in-code defaults (${DEFAULT_HOST}:${DEFAULT_PORT}).
+  Override with --host / --port / --ports when needed.
   node scripts/relay-manager.js start [--host ${DEFAULT_HOST}] [--port ${DEFAULT_PORT}] [--ports ${DEFAULT_PORT},18794] [--timeout 12000] [--status-timeout-ms 1200] [--start-timeout-ms 10000] [--auto-stop-ms 7200000]
   node scripts/relay-manager.js status [--host ${DEFAULT_HOST}] [--port ${DEFAULT_PORT}] [--ports ${DEFAULT_PORT},18794] [--status-timeout-ms 1200] [--all]
   node scripts/relay-manager.js ports [--host ${DEFAULT_HOST}] --action add|remove --ports ${DEFAULT_PORT},18794 [--status-timeout-ms 1200]

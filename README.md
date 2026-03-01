@@ -41,7 +41,7 @@ After install, the skill is available at:
 3. Click **Load unpacked**
 4. Select this folder:
    `~/.agents/skills/agent-browser-relay/extension`
-5. Pin the **Grais Debugger** toolbar icon
+5. Pin the **Agent Browser Relay** toolbar icon
 
 ### 3) Contributor install (optional, for editing this repo)
 If you are developing this skill locally, clone to the canonical path:
@@ -77,18 +77,17 @@ Why this matters: installer-based setup gives a stable path and keeps Codex/Clau
 
 ## Relay Endpoint Defaults
 
-```bash
-export GRAIS_RELAY_HOST=127.0.0.1
-export GRAIS_RELAY_PORT=18793
-export GRAIS_ATTACH_TIMEOUT_MS=120000
-```
+Defaults are set directly in code:
+- Host: `127.0.0.1`
+- Port: `18793`
+- Attach timeout: `120000` ms
 
-Set these before commands if your relay endpoint differs.
+Override per command with flags such as `--host`, `--port`, and `--attach-timeout-ms` when needed.
 
 ## Start Relay (Preferred: Global Service)
 
 ```bash
-npm run relay:global:install -- --ports "${GRAIS_RELAY_PORT:-18793}" --timeout 12000
+npm run relay:global:install -- --ports 18793 --timeout 12000
 npm run relay:global:status
 ```
 
@@ -112,27 +111,27 @@ npm run relay:status -- --status-timeout-ms 3000
 Or explicit host/port:
 
 ```bash
-npm run relay:start -- --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "${GRAIS_RELAY_PORT:-18793}" --status-timeout-ms 3000
+npm run relay:start -- --host 127.0.0.1 --port 18793 --status-timeout-ms 3000
 ```
 
 ## Required Attach Gate (Before Any Read)
 
 After relay startup, a human must attach the target tab:
 1. Open/focus target tab in Chrome.
-2. Open Grais Debugger popup.
+2. Open Agent Browser Relay popup.
 3. Click **Attach this tab**.
 4. Confirm badge shows `ON`.
 
 Then run:
 
 ```bash
-node scripts/read-active-tab.js --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "${GRAIS_RELAY_PORT:-18793}" --check --wait-for-attach --attach-timeout-ms "${GRAIS_ATTACH_TIMEOUT_MS:-120000}"
+node scripts/read-active-tab.js --check --wait-for-attach --attach-timeout-ms 120000
 ```
 
 For multi-agent runs, always target a specific tab lease:
 
 ```bash
-node scripts/read-active-tab.js --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "${GRAIS_RELAY_PORT:-18793}" --tab-id "<TAB_ID>" --check --wait-for-attach --attach-timeout-ms "${GRAIS_ATTACH_TIMEOUT_MS:-120000}"
+node scripts/read-active-tab.js --tab-id "<TAB_ID>" --check --wait-for-attach --attach-timeout-ms 120000
 ```
 
 ## Health Check (Timeout Required)
@@ -140,7 +139,7 @@ node scripts/read-active-tab.js --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "
 Never run bare `curl` for relay checks. Use timeout:
 
 ```bash
-curl --max-time 3 -sS "http://${GRAIS_RELAY_HOST:-127.0.0.1}:${GRAIS_RELAY_PORT:-18793}/status"
+curl --max-time 3 -sS "http://127.0.0.1:18793/status"
 ```
 
 Continue only when status reports:
@@ -152,36 +151,36 @@ Continue only when status reports:
 Default extraction (`url`, `title`, `text`, `links`, `metaDescription`):
 
 ```bash
-node scripts/read-active-tab.js --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "${GRAIS_RELAY_PORT:-18793}" --pretty false
+node scripts/read-active-tab.js --pretty false
 ```
 
 Specific tab lease:
 
 ```bash
-node scripts/read-active-tab.js --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "${GRAIS_RELAY_PORT:-18793}" --tab-id "<TAB_ID>" --pretty false
+node scripts/read-active-tab.js --tab-id "<TAB_ID>" --pretty false
 ```
 
 Full DOM:
 
 ```bash
-node scripts/read-active-tab.js --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "${GRAIS_RELAY_PORT:-18793}" --tab-id "<TAB_ID>" --expression "document.documentElement.outerHTML" --pretty false
+node scripts/read-active-tab.js --tab-id "<TAB_ID>" --expression "document.documentElement.outerHTML" --pretty false
 ```
 
 Screenshot:
 
 ```bash
-node scripts/read-active-tab.js --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "${GRAIS_RELAY_PORT:-18793}" --tab-id "<TAB_ID>" --screenshot --screenshot-full-page --screenshot-path "./tmp/page.png" --pretty false
+node scripts/read-active-tab.js --tab-id "<TAB_ID>" --screenshot --screenshot-full-page --screenshot-path "./tmp/page.png" --pretty false
 ```
 
 WhatsApp messages:
 
 ```bash
-node scripts/read-active-tab.js --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "${GRAIS_RELAY_PORT:-18793}" --tab-id "<TAB_ID>" --preset whatsapp-messages --selector "#main [data-testid=\"conversation-panel-messages\"], #main" --max-messages 200 --pretty false
+node scripts/read-active-tab.js --tab-id "<TAB_ID>" --preset whatsapp-messages --selector "#main [data-testid=\"conversation-panel-messages\"], #main" --max-messages 200 --pretty false
 ```
 
 ## Multi-Port Behavior
 
-- Tabs without a saved mapping use `GRAIS_RELAY_PORT` (default `18793`).
+- Tabs without a saved mapping use the relay default port (`18793`).
 - After successful attach, tab-to-port mapping is stored and reused.
 - Closing a tab clears its mapping.
 
