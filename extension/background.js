@@ -171,7 +171,7 @@ function refreshTabIndicator(tabId) {
     setBadge(normalizedTabId, 'on')
     void chrome.action.setTitle({
       tabId: normalizedTabId,
-      title: 'Grais Debugger Browser Relay: attached (click to detach)',
+      title: 'Agent Browser Relay: attached (click to detach)',
     })
     return
   }
@@ -179,7 +179,7 @@ function refreshTabIndicator(tabId) {
     setBadge(normalizedTabId, 'connecting')
     void chrome.action.setTitle({
       tabId: normalizedTabId,
-      title: 'Grais Debugger Browser Relay: attaching to active tab…',
+      title: 'Agent Browser Relay: attaching to active tab…',
     })
   }
 }
@@ -193,7 +193,7 @@ function sleep(ms) {
 function dbg(...args) {
   if (!DEBUG_LOG) return
   try {
-    console.log('[Grais Debugger]', ...args)
+    console.log('[Agent Browser Relay]', ...args)
   } catch {
     // no-op
   }
@@ -470,7 +470,7 @@ function onRelayClosed(reason) {
     setBadge(tabId, 'connecting')
     void chrome.action.setTitle({
       tabId,
-      title: 'Grais Debugger Browser Relay: disconnected (click to re-attach)',
+      title: 'Agent Browser Relay: disconnected (click to re-attach)',
     })
   }
   tabs.clear()
@@ -748,7 +748,7 @@ async function attachTab(tabId, opts = {}) {
   tabBySession.set(sessionId, tabId)
     void chrome.action.setTitle({
       tabId,
-      title: 'Grais Debugger Browser Relay: attached (click to detach)',
+      title: 'Agent Browser Relay: attached (click to detach)',
     })
 
   if (!opts.skipAttachedEvent) {
@@ -775,7 +775,7 @@ async function ensureActiveTabAttachedFromRelay({ force = false, tabId } = {}) {
   dbg('ensureActiveTabAttachedFromRelay.start', { force, tabId })
   const targetTabId = Number.isInteger(tabId) ? tabId : await resolvePinnedTabId()
   if (!targetTabId) {
-    throw new Error('No pinned tab selected. Click Grais Debugger on the target tab to attach.')
+    throw new Error('No pinned tab selected. Click Agent Browser Relay on the target tab to attach.')
   }
   await ensureRelayConnection(targetTabId)
   manualDetachTabs.delete(targetTabId)
@@ -801,7 +801,7 @@ async function ensureActiveTabAttachedFromRelay({ force = false, tabId } = {}) {
     setBadge(targetTabId, 'connecting')
     void chrome.action.setTitle({
       tabId: targetTabId,
-      title: 'Grais Debugger Browser Relay: attaching to active tab…',
+      title: 'Agent Browser Relay: attaching to active tab…',
     })
     try {
       await attachTab(targetTabId, { skipAttachedEvent: true })
@@ -858,12 +858,12 @@ async function detachTab(tabId, reason) {
   setBadge(tabId, 'off')
     void chrome.action.setTitle({
       tabId,
-      title: 'Grais Debugger Browser Relay (click to attach/detach)',
+      title: 'Agent Browser Relay (click to attach/detach)',
     })
 }
 
 async function connectOrToggleForActiveTab(tab) {
-  console.log('[Grais Debugger] toolbar icon clicked', {
+  console.log('[Agent Browser Relay] toolbar icon clicked', {
     clickedTabId: Number.isInteger(tab?.id) ? tab.id : null,
     clickedTabUrl: tab?.url || null,
     clickedWindowId: Number.isInteger(tab?.windowId) ? tab.windowId : null,
@@ -892,7 +892,7 @@ async function connectOrToggleForActiveTab(tab) {
   setBadge(tabId, 'connecting')
     void chrome.action.setTitle({
       tabId,
-      title: 'Grais Debugger Browser Relay: connecting to local relay…',
+      title: 'Agent Browser Relay: connecting to local relay…',
     })
 
   try {
@@ -917,7 +917,7 @@ async function connectOrToggleForActiveTab(tab) {
     setBadge(tabId, 'error')
     void chrome.action.setTitle({
       tabId,
-      title: 'Grais Debugger Browser Relay: relay not running (open options for setup)',
+      title: 'Agent Browser Relay: relay not running (open options for setup)',
     })
     void maybeOpenHelpOnce()
     // Extra breadcrumbs in chrome://extensions service worker logs.
@@ -968,7 +968,7 @@ async function handleForwardCdpCommand(msg) {
     if (!explicitTabId) {
       return {
         ok: false,
-        error: 'No pinned tab selected. Click Grais Debugger on the target tab to attach.',
+        error: 'No pinned tab selected. Click Agent Browser Relay on the target tab to attach.',
       }
     }
     const tab = await chrome.tabs.get(explicitTabId).catch(() => null)

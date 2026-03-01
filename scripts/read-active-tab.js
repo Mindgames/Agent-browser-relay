@@ -31,8 +31,8 @@ if (options.help) {
   process.exit(0)
 }
 
-const relayHost = String(options.host || process.env.GRAIS_RELAY_HOST || DEFAULT_HOST).trim() || DEFAULT_HOST
-const relayPort = parsePositiveInt(options.port || process.env.GRAIS_RELAY_PORT, DEFAULT_PORT, 'port')
+const relayHost = String(options.host || DEFAULT_HOST).trim() || DEFAULT_HOST
+const relayPort = parsePositiveInt(options.port, DEFAULT_PORT, 'port')
 const relayStatusUrl = `http://${relayHost}:${relayPort}/status`
 const relayWebSocketUrl = `ws://${relayHost}:${relayPort}/extension`
 const timeoutMs = parsePositiveInt(options.timeout, DEFAULT_TIMEOUT_MS, 'timeout')
@@ -1415,7 +1415,7 @@ async function assertRelayConnectionReady() {
   if (!targetStatus || !targetStatus.extensionConnected) {
     assertNoPortMismatch(snapshot)
     throw new Error(
-      `Relay is reachable (${relayStatusUrl}) but extension is not connected. Open the target tab and click Grais Debugger.`,
+      `Relay is reachable (${relayStatusUrl}) but extension is not connected. Open the target tab and click Agent Browser Relay.`,
     )
   }
 }
@@ -1628,7 +1628,7 @@ async function waitForAttachmentReady(options = {}) {
   throw new Error(
     [
       `Timed out waiting for active tab attachment (${timeoutMs}ms) at ${relayStatusUrl}.`,
-      'Keep the target tab active in Chrome and click the Grais Debugger icon to attach.',
+      'Keep the target tab active in Chrome and click the Agent Browser Relay icon to attach.',
       ...(lastFailure ? [`Last observed check state: ${JSON.stringify(lastFailure)}`] : []),
     ].join(' '),
   )
