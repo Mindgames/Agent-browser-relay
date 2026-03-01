@@ -18,7 +18,7 @@ async function checkRelayReachable(port) {
   } catch {
     setStatus(
       'error',
-      `Relay not reachable at ${url}. Start the Grais Debugger browser relay on this machine, then use the toolbar popup again.`,
+      'Relay not active, tell your agent to start it.',
     )
   } finally {
     clearTimeout(t)
