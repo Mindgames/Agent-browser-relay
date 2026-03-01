@@ -3,7 +3,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 CANONICAL_ROOT="${HOME}/.codex/skills/private"
-CANONICAL_SKILL_PATH="${CANONICAL_ROOT}/grais-tab-webdata-reader"
+CANONICAL_SKILL_PATH="${CANONICAL_ROOT}/browser-relay"
 CANONICAL_EXTENSION_PATH="${CANONICAL_SKILL_PATH}/extension"
 
 MODE="install"
@@ -25,10 +25,10 @@ Usage:
   bash scripts/codex-skill-link.sh --force   # replace existing non-symlink path
 
 The script always links this repository to:
-  ~/.codex/skills/private/grais-tab-webdata-reader
+  ~/.codex/skills/private/browser-relay
 
 Then Chrome should load:
-  ~/.codex/skills/private/grais-tab-webdata-reader/extension
+  ~/.codex/skills/private/browser-relay/extension
 EOF
       exit 0
       ;;
