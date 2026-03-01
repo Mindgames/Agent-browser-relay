@@ -58,7 +58,7 @@
         align-items: center;
         margin: 6px 0;
       }
-      input,
+      input:not([type='checkbox']),
       select,
       button {
         border-radius: 0;
@@ -141,6 +141,24 @@
         display: grid;
         gap: 6px;
       }
+      .toggleRow {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        margin-top: 8px;
+      }
+      .toggleRow input[type='checkbox'] {
+        width: 14px;
+        height: 14px;
+        margin-top: 2px;
+        accent-color: var(--accent);
+      }
+      .toggleLabel {
+        display: block;
+        margin: 0;
+        font-size: 12px;
+        line-height: 1.25;
+      }
       a {
         color: color-mix(in oklab, var(--accent) 85%, canvasText 15%);
         font-size: 11px;
@@ -176,6 +194,13 @@
         </div>
         <div class="small">
           Choose a relay port for this tab, then click <strong>Apply</strong>.
+        </div>
+        <div class="toggleRow">
+          <input id="allowCreateTarget" type="checkbox" />
+          <label for="allowCreateTarget" class="toggleLabel">
+            Allow agent to open new background tabs
+            <span class="meta">Controls CDP <code>Target.createTarget</code> requests (off by default).</span>
+          </label>
         </div>
         <div class="row toolbar">
           <button id="attach" type="button">Attach</button>

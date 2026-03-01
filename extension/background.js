@@ -11,6 +11,7 @@ const FORWARD_COMMAND_TIMEOUT_MS = 10000
 const DEBUG_LOG = true
 const ALLOW_FOREGROUND_ACTIVATE_TARGET = false
 const RELAY_PORT_BY_TAB_KEY = 'relayPortByTab'
+const ALLOW_TARGET_CREATE_KEY = 'allowTargetCreate'
 
 const BADGE = {
   on: { text: 'ON', color: '#16A34A' },
@@ -43,6 +44,8 @@ let debuggerListenersInstalled = false
 let userAttachmentEnabled = false
 /** @type {number|null} */
 let userPinnedTabId = null
+/** @type {boolean} */
+let allowTargetCreate = false
 
 let nextSession = 1
 let currentRelayPort = DEFAULT_PORT
@@ -143,6 +146,16 @@ async function setPinnedTabPref(tabId) {
     return
   }
   await chrome.storage.local.set({ userPinnedTabId: normalized })
+}
+
+async function getAllowTargetCreatePref() {
+  const stored = await chrome.storage.local.get([ALLOW_TARGET_CREATE_KEY])
+  return stored[ALLOW_TARGET_CREATE_KEY] === true
+}
+
+async function setAllowTargetCreatePref(enabled) {
+  allowTargetCreate = Boolean(enabled)
+  await chrome.storage.local.set({ [ALLOW_TARGET_CREATE_KEY]: allowTargetCreate })
 }
 
 async function disableAttachmentState() {
@@ -1055,6 +1068,9 @@ async function handleForwardCdpCommand(msg) {
     }
 
     if (method === 'Target.createTarget') {
+      if (!allowTargetCreate) {
+        throw new Error('Target.createTarget is disabled. Enable "Allow agent to open new background tabs" in the popup.')
+      }
       const url = typeof params?.url === 'string' ? params.url : 'about:blank'
       dbg('handleForwardCdpCommand.targetCreate', { requestedUrl: url })
       const tab = await chrome.tabs.create({ url, active: false })
@@ -1130,12 +1146,14 @@ async function handleForwardCdpCommand(msg) {
 
 async function initializeAttachmentState() {
   try {
-    const [shouldBeAttached, pinnedTabPref] = await Promise.all([
+    const [shouldBeAttached, pinnedTabPref, allowTargetCreatePref] = await Promise.all([
       getUserAttachmentPref(),
       getPinnedTabPref(),
+      getAllowTargetCreatePref(),
     ])
     userAttachmentEnabled = Boolean(shouldBeAttached)
     userPinnedTabId = pinnedTabPref
+    allowTargetCreate = Boolean(allowTargetCreatePref)
     if (!shouldBeAttached) return
     if (!Number.isInteger(userPinnedTabId)) {
       await disableAttachmentState()
@@ -1228,6 +1246,7 @@ chrome.runtime.onInstalled.addListener(() => {
   void Promise.allSettled([
     setUserAttachmentPref(false),
     setPinnedTabPref(null),
+    setAllowTargetCreatePref(false),
   ])
   // Useful: first-time instructions.
   void chrome.runtime.openOptionsPage()
@@ -1277,6 +1296,7 @@ async function getPopupState(tabId, includeAllTabs = true) {
     mappedPort: Number.isInteger(mappedPort) ? mappedPort : null,
     effectivePort: Number.isInteger(effectivePort) ? effectivePort : defaultPort,
     userAttachmentEnabled,
+    allowTargetCreate,
     activeTabState: requestedTabId && tabs.get(requestedTabId)?.state ? tabs.get(requestedTabId).state : null,
     connectedTabs,
   }
@@ -1330,6 +1350,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         const state = await getPopupState(tabId, true)
         const wasAttached = state.activeTabState === 'connected'
         sendResponse({ ok: true, attached: wasAttached, ...state })
+        return
+      }
+
+      if (message.type === 'grais.popup.setTargetCreateEnabled') {
+        const enabled = message.enabled === true
+        await setAllowTargetCreatePref(enabled)
+        const state = await getPopupState(message.tabId, true)
+        sendResponse({ ok: true, ...state })
         return
       }
 
