@@ -1,6 +1,22 @@
-# Grais Debugger Chrome Extension (Browser Relay)
+# Agent Browser Relay (Chrome)
 
-Local browser-relay for Grais: attach a chosen Chrome tab, run CDP reads, and return structured JSON.
+Agent Browser Relay lets your agent control and read from tabs in your real Chrome session, including multiple attached tabs in parallel, without forcing a separate browser profile.
+
+## Why Use It
+
+- Run agent reads on multiple attached tabs concurrently with per-tab lease isolation (`--tab-id`).
+- Execute on background/non-focused tabs while you continue using your browser.
+- Keep your real logged-in session (cookies, auth state, extensions) instead of re-automating login in a disposable browser.
+- Extract structured page data, full DOM, screenshots, and chat/message presets via one CLI.
+- Recover from tab/context changes with reconnect + attach checks designed for long-running agent workflows.
+- Stop safely when CAPTCHA/human verification appears, and alert the user before continuing.
+
+## What You Get
+
+- Chrome extension bridge for attach/detach from the toolbar popup.
+- Local relay service with global always-on mode (`launchd` / `systemd --user`).
+- Scriptable read/check interface (`node scripts/read-active-tab.js`) for agent workflows.
+- Explicit tab leasing model for multi-agent safety on shared relay infrastructure.
 
 ## Quick Start (Human Setup)
 
@@ -217,3 +233,9 @@ Use only these script names:
 - `node scripts/read-active-tab.js`
 
 Do not restart relay just because local files changed. Restart only when explicitly requested by a human, or for hard recovery failures.
+
+If CAPTCHA/human verification appears, stop immediately, alert the user, and wait for explicit confirmation before continuing.
+
+## Recommended Companion
+
+For human-in-the-loop workflows, we recommend using [attention-please](https://github.com/Mindgames/attention-please) so the user gets an immediate alert when manual action is needed (for example CAPTCHA or verification gates).
