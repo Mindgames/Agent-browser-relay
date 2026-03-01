@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Grais Debugger Browser Relay",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Attach Grais Debugger to your existing Chrome tab via a local CDP relay server.",
   "icons": {
     "16": "icons/icon16.png",

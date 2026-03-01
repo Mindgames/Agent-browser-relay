@@ -5,12 +5,13 @@ This repository provides a local browser-relay so Grais can attach to a **chosen
 
 - The extension manages tab attachment from the toolbar popup.
 - The relay server tunnels requests from the skill into Chrome DevTools Protocol (CDP).
-- The `grais-tab-webdata-reader` skill reads and consumes the result payload from the relay and prints JSON directly to stdout.
+- The `browser-relay` skill reads and consumes the result payload from the relay and prints JSON directly to stdout.
 
 ## Capabilities
 - Attach or detach the chosen tab from the toolbar popup.
 - Keep multiple tabs attached concurrently in one extension instance.
 - Recover/reconnect when tab context changes.
+- Spawn a new background tab via CDP (`Target.createTarget`) and auto-attach it through the extension bridge.
 - Execute JavaScript in-page via CDP (`Runtime.evaluate`).
 - Capture screenshots from the attached tab (`--screenshot`, optional `--screenshot-full-page`).
 - Relay session/lease isolation for multi-agent workflows (`--tab-id`).
@@ -32,13 +33,22 @@ export GRAIS_RELAY_PORT=18793
 
 1. Install and open extension
    - After checking out the repository, run `npm run codex:install` to map this copy into:
-     `~/.codex/skills/private/grais-tab-webdata-reader`
+     `~/.codex/skills/private/browser-relay`
    - Chrome → `chrome://extensions`
    - Enable Developer mode
-   - Load unpacked and select `~/.codex/skills/private/grais-tab-webdata-reader/extension`
+   - Load unpacked and select `~/.codex/skills/private/browser-relay/extension`
    - Pin Grais Debugger icon to the toolbar
    - Run `npm install` once if this checkout has never installed dependencies.
-2. Start relay server:
+2. Start relay server in global mode (preferred, always-on):
+
+   ```bash
+   npm run relay:global:install -- --ports "${GRAIS_RELAY_PORT:-18793}" --timeout 12000
+   npm run relay:global:status
+   ```
+
+   This installs a user-level background service (`launchd` on macOS, `systemd --user` on Linux).
+
+3. Legacy one-off start (fallback):
 
    ```bash
    npm run relay:start
@@ -52,7 +62,7 @@ export GRAIS_RELAY_PORT=18793
    npm run relay:start -- --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "${GRAIS_RELAY_PORT:-18793}"
    ```
 
-3. `relay:start` keeps relay running and auto-stops after 2 hours by default (to avoid start/stop churn).
+4. `relay:start` keeps relay running and auto-stops after 2 hours by default (to avoid start/stop churn).
    Override when needed:
 
    ```bash
@@ -63,7 +73,7 @@ export GRAIS_RELAY_PORT=18793
 If the `.codex` working tree ever loses subfolders after fetch/reset operations (for example `extension/`), run:
 
 ```bash
-cd ~/.codex/skills/private/grais-tab-webdata-reader
+cd ~/.codex/skills/private/browser-relay
 git sparse-checkout disable
 git config --unset-all core.sparseCheckout || true
 git config --unset-all core.sparseCheckoutCone || true
@@ -72,14 +82,21 @@ git checkout -- .
 
 This refreshes sparse state and restores all missing tracked directories in the skill copy.
 
-4. Keep relay running continuously while using the extension and only stop when finished:
+5. Keep relay running continuously while using the extension and only stop when finished:
+
+   ```bash
+   npm run relay:global:status
+   npm run relay:global:stop
+   ```
+
+   or in legacy one-off mode:
 
    ```bash
    npm run relay:status -- --status-timeout-ms 3000
    npm run relay:stop
    ```
 
-5. Human attach gate (required for agent workflows):
+6. Human attach gate (required for agent workflows):
    - After relay is started, the agent must pause and ask the human to attach the target tab:
      - Open/focus the target tab in Chrome.
      - Open the toolbar popup and click **Attach this tab** so the badge shows `ON`.
@@ -101,11 +118,15 @@ This refreshes sparse state and restores all missing tracked directories in the 
 
 ## Agent execution contract (mandatory)
 - Use these exact scripts and command names. Do not search for alternatives and do not say they "may be named differently":
+  - `npm run relay:global:install`
+  - `npm run relay:global:status`
+  - `npm run relay:global:start`
+  - `npm run relay:global:stop`
   - `npm run relay:start`
   - `npm run relay:status`
   - `npm run relay:stop`
   - `node scripts/read-active-tab.js`
-- After `relay:start`, agent must stop and ask the human to attach the target tab, then wait for confirmation.
+- After relay startup (`relay:global:start` / `relay:global:install` or `relay:start`), agent must stop and ask the human to attach the target tab, then wait for confirmation.
 - Agent must run `node scripts/read-active-tab.js --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "${GRAIS_RELAY_PORT:-18793}" --check --wait-for-attach --attach-timeout-ms 120000` before any data read and continue only on success.
 - For multi-agent or concurrent runs, agent must use tab leasing by setting `--tab-id <tabId>` on all read/check commands.
 - Agent must resolve `tabId` from relay status (`/status` or `npm run relay:status -- --all`) and explicitly target that tab.
@@ -127,7 +148,8 @@ Never run bare `curl` without a timeout for relay checks.
 1. Open and focus the target tab(s) in Chrome.
 2. Open the Grais Debugger popup and click "Attach this tab" for each tab an agent should use.
 3. Resolve each target `tabId` from status output (`npm run relay:status -- --all --status-timeout-ms 3000`).
-4. Validate readiness before each read:
+4. Optional: spawn a new tab via relay CDP forwarding (`Target.createTarget`), then re-run status and resolve the new `tabId`.
+5. Validate readiness before each read:
 
    ```bash
    node scripts/read-active-tab.js --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "${GRAIS_RELAY_PORT:-18793}" --tab-id "<TAB_ID>" --check
@@ -138,13 +160,13 @@ Never run bare `curl` without a timeout for relay checks.
 
    If relay is reachable this command waits for an active attachment instead of immediate failure.
 
-5. Read default extraction from a specific leased tab:
+6. Read default extraction from a specific leased tab:
 
    ```bash
    node scripts/read-active-tab.js --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "${GRAIS_RELAY_PORT:-18793}" --tab-id "<TAB_ID>" --pretty false
    ```
 
-6. Read full DOM:
+7. Read full DOM:
 
    ```bash
    node scripts/read-active-tab.js \
@@ -159,7 +181,7 @@ Never run bare `curl` without a timeout for relay checks.
      --expression "document.documentElement.outerHTML" --pretty false
    ```
 
-7. Capture a screenshot:
+8. Capture a screenshot:
 
    ```bash
    node scripts/read-active-tab.js \
@@ -180,7 +202,7 @@ Never run bare `curl` without a timeout for relay checks.
      --pretty false
    ```
 
-8. Read WhatsApp messages (dry-run target):
+9. Read WhatsApp messages (dry-run target):
 
    ```bash
    node scripts/read-active-tab.js \

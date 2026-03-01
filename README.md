@@ -5,6 +5,7 @@ Use this project to let Grais read data from the **attached Chrome tab** through
 ## What runs where
 - Extension (`extension/background.js`): attaches/detaches a chosen tab.
 - Relay (`relay-server.js`): local bridge default host/port `127.0.0.1:18793`, configurable per run.
+- Global relay service (`scripts/relay-service.js`): user-level launchd/systemd service for always-on relay lifecycle.
 - Reader (`scripts/read-active-tab.js`): executes reads and prints JSON.
 - Relay sessions: controllers can lease a specific tab id so concurrent agents on one relay stay isolated.
 
@@ -36,7 +37,7 @@ npm run codex:install
 If pulls/fetches into this folder ever make `extension/` disappear, the repo has entered sparse mode.
 
 ```bash
-cd ~/.codex/skills/private/grais-tab-webdata-reader
+cd ~/.codex/skills/private/browser-relay
 git sparse-checkout disable
 git config --unset-all core.sparseCheckout || true
 git config --unset-all core.sparseCheckoutCone || true
@@ -50,7 +51,7 @@ This should instantly restore `extension`, `scripts`, and all other tracked fold
    - Open `chrome://extensions`
    - Enable Developer mode
    - Run `npm run codex:install` once after checkout (or after moving the repo)
-   - Load unpacked from `~/.codex/skills/private/grais-tab-webdata-reader/extension`
+   - Load unpacked from `~/.codex/skills/private/browser-relay/extension`
    - Pin Grais Debugger icon
 
 ### Per-tab relay port behavior
@@ -63,28 +64,29 @@ You can run one relay process with multiple ports (`--ports`) and attach differe
 ## 3) Start a session (always this order)
 ### Recommended: install as a global service (for multiple agents)
 For shared work across agents, keep one relay service running and never stop it manually until explicitly needed.
+This "global" mode is user-level on your machine (`launchd` on macOS / `systemd --user` on Linux), not a root system daemon.
 
 ```bash
 cd grais-debug-relay
-npm run relay:service:install -- --ports 18793 --timeout 12000 --max-runtime-ms 0
+npm run relay:global:install -- --ports 18793 --timeout 12000
 ```
 
 Useful lifecycle commands:
 
 ```bash
-npm run relay:service:status
-npm run relay:service:stop
-npm run relay:service:start
-npm run relay:service:restart
-npm run relay:service:update
-npm run relay:service:uninstall
+npm run relay:global:status
+npm run relay:global:stop
+npm run relay:global:start
+npm run relay:global:restart
+npm run relay:global:update
+npm run relay:global:uninstall
 ```
 
 When relay code changes, update by restarting/reinstalling so the new binary is picked up by the managed service (only when explicitly requested/planned):
 
 ```bash
 git pull
-npm run relay:service:update -- --wait-for-ready --ready-timeout-ms 10000
+npm run relay:global:update -- --wait-for-ready --ready-timeout-ms 10000
 ```
 
 If you prefer one-off startup instead of service management, use the existing `relay:start` flow in the steps below.
@@ -203,6 +205,17 @@ node scripts/read-active-tab.js \
 ```
 
 ## 5) Relay lifecycle
+Global service mode:
+
+```bash
+npm run relay:global:status
+npm run relay:global:stop
+npm run relay:global:start
+npm run relay:global:restart
+```
+
+Legacy one-off mode:
+
 Status:
 
 ```bash
@@ -216,6 +229,7 @@ npm run relay:stop
 ```
 
 Notes:
+- `relay:global:install` sets `--max-runtime-ms 0` (no auto-stop) for always-on relay behavior.
 - `relay:start` auto-stops after 2 hours by default.
 - Override: `node scripts/relay-manager.js start --auto-stop-ms 10800000`
 - Disable auto-stop: `node scripts/relay-manager.js start --auto-stop-ms 0`
@@ -264,6 +278,12 @@ node scripts/read-active-tab.js --host "${GRAIS_RELAY_HOST:-127.0.0.1}" --port "
 ```bash
 npm run relay:stop
 npm run relay:start -- --status-timeout-ms 3000
+```
+
+or in global service mode:
+
+```bash
+npm run relay:global:restart -- --wait-for-ready --ready-timeout-ms 10000
 ```
 
 Note: every successful read/check response contains:

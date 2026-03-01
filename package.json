@@ -21,6 +21,13 @@
     "relay:service:restart": "node scripts/relay-service.js restart",
     "relay:service:update": "node scripts/relay-service.js restart",
     "relay:service:status": "node scripts/relay-service.js status",
+    "relay:global:install": "node scripts/relay-service.js install --max-runtime-ms 0",
+    "relay:global:uninstall": "node scripts/relay-service.js uninstall",
+    "relay:global:start": "node scripts/relay-service.js start",
+    "relay:global:stop": "node scripts/relay-service.js stop",
+    "relay:global:restart": "node scripts/relay-service.js restart",
+    "relay:global:update": "node scripts/relay-service.js restart",
+    "relay:global:status": "node scripts/relay-service.js status",
     "codex:install": "bash scripts/codex-skill-link.sh",
     "codex:install:check": "bash scripts/codex-skill-link.sh --check"
   },
