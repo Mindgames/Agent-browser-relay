@@ -1,9 +1,9 @@
 ---
-name: browser-relay
+name: agent-browser-relay
 description: Read metadata and DOM payloads from an attached Chrome tab through a local Grais relay extension.
 ---
 
-# Browser Relay
+# Agent Browser Relay
 
 Use this skill to attach to a chosen Chrome tab through the bundled Grais Debugger extension and extract tab metadata or DOM data for analysis.
 
@@ -46,7 +46,7 @@ export GRAIS_ATTACH_TIMEOUT_MS=120000
 
    - `chrome://extensions`
    - Enable developer mode
-   - Load unpacked from `~/.codex/skills/private/browser-relay/extension`
+   - Load unpacked from `~/.agents/skills/private/agent-browser-relay/extension`
 
 3. Attach the extension to the target tab (open toolbar popup and click attach)
 
@@ -54,10 +54,10 @@ export GRAIS_ATTACH_TIMEOUT_MS=120000
 
    Agent requirement: after `relay:start`, pause and ask the human to do this attach step, then wait for confirmation before continuing.
 
-   If your `.codex` skill folder drops `extension/` after a `git fetch` or pull, repair it from the repo:
+   If your `.agents` skill folder drops `extension/` after a `git fetch` or pull, repair it from the repo:
 
    ```bash
-   cd ~/.codex/skills/private/browser-relay
+   cd ~/.agents/skills/private/agent-browser-relay
    git sparse-checkout disable
    git config --unset-all core.sparseCheckout || true
    git config --unset-all core.sparseCheckoutCone || true

@@ -5,7 +5,7 @@ This repository provides a local browser-relay so Grais can attach to a **chosen
 
 - The extension manages tab attachment from the toolbar popup.
 - The relay server tunnels requests from the skill into Chrome DevTools Protocol (CDP).
-- The `browser-relay` skill reads and consumes the result payload from the relay and prints JSON directly to stdout.
+- The `agent-browser-relay` skill reads and consumes the result payload from the relay and prints JSON directly to stdout.
 
 ## Capabilities
 - Attach or detach the chosen tab from the toolbar popup.
@@ -33,10 +33,10 @@ export GRAIS_RELAY_PORT=18793
 
 1. Install and open extension
    - After checking out the repository, run `npm run codex:install` to map this copy into:
-     `~/.codex/skills/private/browser-relay`
+     `~/.agents/skills/private/agent-browser-relay`
    - Chrome → `chrome://extensions`
    - Enable Developer mode
-   - Load unpacked and select `~/.codex/skills/private/browser-relay/extension`
+   - Load unpacked and select `~/.agents/skills/private/agent-browser-relay/extension`
    - Pin Grais Debugger icon to the toolbar
    - Run `npm install` once if this checkout has never installed dependencies.
 2. Start relay server in global mode (preferred, always-on):
@@ -70,10 +70,10 @@ export GRAIS_RELAY_PORT=18793
   node scripts/relay-manager.js start --auto-stop-ms 0
   ```
 
-If the `.codex` working tree ever loses subfolders after fetch/reset operations (for example `extension/`), run:
+If the `.agents` working tree ever loses subfolders after fetch/reset operations (for example `extension/`), run:
 
 ```bash
-cd ~/.codex/skills/private/browser-relay
+cd ~/.agents/skills/private/agent-browser-relay
 git sparse-checkout disable
 git config --unset-all core.sparseCheckout || true
 git config --unset-all core.sparseCheckoutCone || true
