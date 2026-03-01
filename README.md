@@ -43,14 +43,27 @@ After install, the skill is available at:
    `~/.agents/skills/agent-browser-relay/extension`
 5. Pin the **Agent Browser Relay** toolbar icon
 
-### 3) Contributor install (optional, for editing this repo)
-If you are developing this skill locally, clone to the canonical path:
+### 3) Attach tabs and allow broader tab control
 
-```bash
-git clone git@github.com:Mindgames/Agent-browser-relay.git ~/.agents/skills/agent-browser-relay
-cd ~/.agents/skills/agent-browser-relay
-npm install
-```
+1. Open the Chrome tab you want the agent to use.
+2. Open the **Agent Browser Relay** popup from the toolbar icon.
+3. Click **Attach this tab** and confirm the badge shows `ON`.
+4. If you want the agent to open additional background tabs, enable **Allow agent to open new background tabs** in the popup.
+5. In **Connections**, click **Copy ID** for the attached tab and send it to your agent, for example: `Use tab 4581930`.
+6. Repeat for every tab you want the agent to access.
+
+### 4) Showcase: User + Agent Flow
+
+Example prompt to your agent:
+
+`Use Agent Browser Relay to audit the current page and summarize the most important links. Use tab 4581930.`
+
+Expected flow:
+
+1. Agent starts relay (for example `npm run relay:global:install -- --ports 18793 --timeout 12000`).
+2. Agent asks you to open/focus the target tab and click **Attach this tab** in the popup.
+3. You attach the tab and confirm.
+4. Agent runs the attach check and continues reads using the tab ID you shared.
 
 ## Skill Directory Structure (`.agents` + `.claude`)
 
@@ -233,3 +246,5 @@ If CAPTCHA/human verification appears, stop immediately, alert the user, and wai
 ## Recommended Companion
 
 For human-in-the-loop workflows, we recommend using [attention-please](https://github.com/Mindgames/attention-please) so the user gets an immediate alert when manual action is needed (for example CAPTCHA or verification gates).
+
+Made by Mathias Asberg: [GitHub](https://github.com/Mindgames), [X](https://x.com/mathiiias123), [LinkedIn](https://www.linkedin.com/in/imathias/).
