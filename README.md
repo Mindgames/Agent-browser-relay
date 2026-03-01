@@ -20,42 +20,37 @@ Agent Browser Relay lets your agent control and read from tabs in your real Chro
 
 ## Quick Start (Human Setup)
 
-### 1) Clone into the global `~/.agents` skills folder
-Recommended (SSH):
+### 1) Install with `skills` CLI (recommended)
 
 ```bash
-mkdir -p ~/.agents/skills/private
-git clone git@github.com:Mindgames/Agent-browser-relay.git ~/.agents/skills/private/agent-browser-relay
-cd ~/.agents/skills/private/agent-browser-relay
-npm install
+npx skills add Mindgames/Agent-browser-relay
 ```
 
-If you prefer HTTPS:
+For unattended global install (recommended in automations/scripts):
 
 ```bash
-mkdir -p ~/.agents/skills/private
-git clone https://github.com/Mindgames/Agent-browser-relay.git ~/.agents/skills/private/agent-browser-relay
-cd ~/.agents/skills/private/agent-browser-relay
-npm install
+npx skills add Mindgames/Agent-browser-relay -g -y
 ```
 
-### 2) Reuse the same skill for Claude CLI (single source of truth)
-If you want one shared installation for both Codex CLI and Claude CLI, symlink Claude's global skill path:
+### 2) Load the extension in Chrome (Developer mode)
+After install, the skill is available at:
+`~/.agents/skills/agent-browser-relay`
 
-```bash
-mkdir -p ~/.claude/skills
-ln -sfn ~/.agents/skills/private/agent-browser-relay ~/.claude/skills/agent-browser-relay
-```
-
-### 3) Load the extension in Chrome (Developer mode)
 1. Open `chrome://extensions`
 2. Enable **Developer mode**
 3. Click **Load unpacked**
 4. Select this folder:
-   `~/.agents/skills/private/agent-browser-relay/extension`
+   `~/.agents/skills/agent-browser-relay/extension`
 5. Pin the **Grais Debugger** toolbar icon
 
-If you move the repo, update this folder path in Chrome and re-load unpacked.
+### 3) Contributor install (optional, for editing this repo)
+If you are developing this skill locally, clone to the canonical path:
+
+```bash
+git clone git@github.com:Mindgames/Agent-browser-relay.git ~/.agents/skills/agent-browser-relay
+cd ~/.agents/skills/agent-browser-relay
+npm install
+```
 
 ## Skill Directory Structure (`.agents` + `.claude`)
 
@@ -63,14 +58,14 @@ This repo integrates with two different skill roots:
 
 - `~/.agents/skills/agent-browser/`
   - Houses the `agent-browser` skill/CLI workflow used for browser automation.
-- `~/.agents/skills/private/agent-browser-relay`
+- `~/.agents/skills/agent-browser-relay`
   - Canonical global skill path for this relay project.
 - `~/.claude/skills/agent-browser-relay`
-  - Optional symlink to reuse the same repo in Claude CLI.
-- `~/.agents/skills/private/agent-browser-relay/extension`
+  - Usually symlinked automatically by the `skills` installer when Claude Code is present.
+- `~/.agents/skills/agent-browser-relay/extension`
   - Exact Chrome extension directory to load in Developer mode.
 
-Why this matters: one clone under `~/.agents` avoids drift, and Claude can consume the same files via symlink.
+Why this matters: installer-based setup gives a stable path and keeps Codex/Claude integrations consistent.
 
 ## Components
 
@@ -212,7 +207,7 @@ npm run relay:status -- --status-timeout-ms 3000
 - Sparse checkout accidentally hid folders in canonical skill copy:
 
 ```bash
-cd ~/.agents/skills/private/agent-browser-relay
+cd ~/.agents/skills/agent-browser-relay
 git sparse-checkout disable
 git config --unset-all core.sparseCheckout || true
 git config --unset-all core.sparseCheckoutCone || true
