@@ -18,8 +18,8 @@ const DEFAULT_READY_CHECK_DELAY_MS = 250
 
 const REPO_ROOT = path.resolve(fs.realpathSync(__dirname), '..')
 const RELAY_SERVER_PATH = path.join(REPO_ROOT, 'relay-server.js')
-const RELAY_HOST_DEFAULT = parseHost(process.env.GRAIS_RELAY_HOST || DEFAULT_HOST)
-const RELAY_PORT_DEFAULT = parsePositiveInt(process.env.GRAIS_RELAY_PORT || String(DEFAULT_PORT), DEFAULT_PORT, 'relay port')
+const RELAY_HOST_DEFAULT = parseHost(DEFAULT_HOST)
+const RELAY_PORT_DEFAULT = DEFAULT_PORT
 
 const args = parseArgs(process.argv.slice(2))
 const command = args.command
@@ -362,7 +362,7 @@ function ensureServiceFile() {
 
   if (PLATFORM === 'linux') {
     const unit = `[Unit]
-Description=Grais Debugger Relay
+Description=Agent Browser Relay
 After=network-online.target
 
 [Service]

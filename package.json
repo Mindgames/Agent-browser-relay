@@ -1,9 +1,9 @@
 {
-  "name": "grais-debugger-relay",
+  "name": "agent-browser-relay",
   "private": true,
   "version": "0.1.0",
   "bin": {
-    "grais-debugger-relay": "relay-server.js"
+    "agent-browser-relay": "relay-server.js"
   },
   "scripts": {
     "lint": "node --check relay-server.js extension/background.js extension/options.js scripts/read-active-tab.js scripts/relay-manager.js scripts/relay-service.js",

@@ -18,7 +18,7 @@ async function checkRelayReachable(port) {
   } catch {
     setStatus(
       'error',
-      'Relay not active, tell your agent to start it.',
+      'Relay not active, tell your agent to start Agent Browser Relay.',
     )
   } finally {
     clearTimeout(t)

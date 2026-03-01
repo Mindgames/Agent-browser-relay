@@ -11,6 +11,7 @@ const FORWARD_COMMAND_TIMEOUT_MS = 10000
 const DEBUG_LOG = true
 const ALLOW_FOREGROUND_ACTIVATE_TARGET = false
 const RELAY_PORT_BY_TAB_KEY = 'relayPortByTab'
+const ALLOW_TARGET_CREATE_KEY = 'allowTargetCreate'
 
 const BADGE = {
   on: { text: 'ON', color: '#16A34A' },
@@ -43,6 +44,8 @@ let debuggerListenersInstalled = false
 let userAttachmentEnabled = false
 /** @type {number|null} */
 let userPinnedTabId = null
+/** @type {boolean} */
+let allowTargetCreate = false
 
 let nextSession = 1
 let currentRelayPort = DEFAULT_PORT
@@ -145,6 +148,16 @@ async function setPinnedTabPref(tabId) {
   await chrome.storage.local.set({ userPinnedTabId: normalized })
 }
 
+async function getAllowTargetCreatePref() {
+  const stored = await chrome.storage.local.get([ALLOW_TARGET_CREATE_KEY])
+  return stored[ALLOW_TARGET_CREATE_KEY] === true
+}
+
+async function setAllowTargetCreatePref(enabled) {
+  allowTargetCreate = Boolean(enabled)
+  await chrome.storage.local.set({ [ALLOW_TARGET_CREATE_KEY]: allowTargetCreate })
+}
+
 async function disableAttachmentState() {
   userAttachmentEnabled = false
   userPinnedTabId = null
@@ -171,7 +184,7 @@ function refreshTabIndicator(tabId) {
     setBadge(normalizedTabId, 'on')
     void chrome.action.setTitle({
       tabId: normalizedTabId,
-      title: 'Grais Debugger Browser Relay: attached (click to detach)',
+      title: 'Agent Browser Relay: attached (click to detach)',
     })
     return
   }
@@ -179,7 +192,7 @@ function refreshTabIndicator(tabId) {
     setBadge(normalizedTabId, 'connecting')
     void chrome.action.setTitle({
       tabId: normalizedTabId,
-      title: 'Grais Debugger Browser Relay: attaching to active tab…',
+      title: 'Agent Browser Relay: attaching to active tab…',
     })
   }
 }
@@ -193,7 +206,7 @@ function sleep(ms) {
 function dbg(...args) {
   if (!DEBUG_LOG) return
   try {
-    console.log('[Grais Debugger]', ...args)
+    console.log('[Agent Browser Relay]', ...args)
   } catch {
     // no-op
   }
@@ -470,7 +483,7 @@ function onRelayClosed(reason) {
     setBadge(tabId, 'connecting')
     void chrome.action.setTitle({
       tabId,
-      title: 'Grais Debugger Browser Relay: disconnected (click to re-attach)',
+      title: 'Agent Browser Relay: disconnected (click to re-attach)',
     })
   }
   tabs.clear()
@@ -748,7 +761,7 @@ async function attachTab(tabId, opts = {}) {
   tabBySession.set(sessionId, tabId)
     void chrome.action.setTitle({
       tabId,
-      title: 'Grais Debugger Browser Relay: attached (click to detach)',
+      title: 'Agent Browser Relay: attached (click to detach)',
     })
 
   if (!opts.skipAttachedEvent) {
@@ -775,7 +788,7 @@ async function ensureActiveTabAttachedFromRelay({ force = false, tabId } = {}) {
   dbg('ensureActiveTabAttachedFromRelay.start', { force, tabId })
   const targetTabId = Number.isInteger(tabId) ? tabId : await resolvePinnedTabId()
   if (!targetTabId) {
-    throw new Error('No pinned tab selected. Click Grais Debugger on the target tab to attach.')
+    throw new Error('No pinned tab selected. Click Agent Browser Relay on the target tab to attach.')
   }
   await ensureRelayConnection(targetTabId)
   manualDetachTabs.delete(targetTabId)
@@ -801,7 +814,7 @@ async function ensureActiveTabAttachedFromRelay({ force = false, tabId } = {}) {
     setBadge(targetTabId, 'connecting')
     void chrome.action.setTitle({
       tabId: targetTabId,
-      title: 'Grais Debugger Browser Relay: attaching to active tab…',
+      title: 'Agent Browser Relay: attaching to active tab…',
     })
     try {
       await attachTab(targetTabId, { skipAttachedEvent: true })
@@ -858,12 +871,12 @@ async function detachTab(tabId, reason) {
   setBadge(tabId, 'off')
     void chrome.action.setTitle({
       tabId,
-      title: 'Grais Debugger Browser Relay (click to attach/detach)',
+      title: 'Agent Browser Relay (click to attach/detach)',
     })
 }
 
 async function connectOrToggleForActiveTab(tab) {
-  console.log('[Grais Debugger] toolbar icon clicked', {
+  console.log('[Agent Browser Relay] toolbar icon clicked', {
     clickedTabId: Number.isInteger(tab?.id) ? tab.id : null,
     clickedTabUrl: tab?.url || null,
     clickedWindowId: Number.isInteger(tab?.windowId) ? tab.windowId : null,
@@ -892,7 +905,7 @@ async function connectOrToggleForActiveTab(tab) {
   setBadge(tabId, 'connecting')
     void chrome.action.setTitle({
       tabId,
-      title: 'Grais Debugger Browser Relay: connecting to local relay…',
+      title: 'Agent Browser Relay: connecting to local relay…',
     })
 
   try {
@@ -917,7 +930,7 @@ async function connectOrToggleForActiveTab(tab) {
     setBadge(tabId, 'error')
     void chrome.action.setTitle({
       tabId,
-      title: 'Grais Debugger Browser Relay: relay not running (open options for setup)',
+      title: 'Agent Browser Relay: relay not running (open options for setup)',
     })
     void maybeOpenHelpOnce()
     // Extra breadcrumbs in chrome://extensions service worker logs.
@@ -968,7 +981,7 @@ async function handleForwardCdpCommand(msg) {
     if (!explicitTabId) {
       return {
         ok: false,
-        error: 'No pinned tab selected. Click Grais Debugger on the target tab to attach.',
+        error: 'No pinned tab selected. Click Agent Browser Relay on the target tab to attach.',
       }
     }
     const tab = await chrome.tabs.get(explicitTabId).catch(() => null)
@@ -1055,6 +1068,9 @@ async function handleForwardCdpCommand(msg) {
     }
 
     if (method === 'Target.createTarget') {
+      if (!allowTargetCreate) {
+        throw new Error('Target.createTarget is disabled. Enable "Allow agent to open new background tabs" in the popup.')
+      }
       const url = typeof params?.url === 'string' ? params.url : 'about:blank'
       dbg('handleForwardCdpCommand.targetCreate', { requestedUrl: url })
       const tab = await chrome.tabs.create({ url, active: false })
@@ -1130,12 +1146,14 @@ async function handleForwardCdpCommand(msg) {
 
 async function initializeAttachmentState() {
   try {
-    const [shouldBeAttached, pinnedTabPref] = await Promise.all([
+    const [shouldBeAttached, pinnedTabPref, allowTargetCreatePref] = await Promise.all([
       getUserAttachmentPref(),
       getPinnedTabPref(),
+      getAllowTargetCreatePref(),
     ])
     userAttachmentEnabled = Boolean(shouldBeAttached)
     userPinnedTabId = pinnedTabPref
+    allowTargetCreate = Boolean(allowTargetCreatePref)
     if (!shouldBeAttached) return
     if (!Number.isInteger(userPinnedTabId)) {
       await disableAttachmentState()
@@ -1228,6 +1246,7 @@ chrome.runtime.onInstalled.addListener(() => {
   void Promise.allSettled([
     setUserAttachmentPref(false),
     setPinnedTabPref(null),
+    setAllowTargetCreatePref(false),
   ])
   // Useful: first-time instructions.
   void chrome.runtime.openOptionsPage()
@@ -1277,6 +1296,7 @@ async function getPopupState(tabId, includeAllTabs = true) {
     mappedPort: Number.isInteger(mappedPort) ? mappedPort : null,
     effectivePort: Number.isInteger(effectivePort) ? effectivePort : defaultPort,
     userAttachmentEnabled,
+    allowTargetCreate,
     activeTabState: requestedTabId && tabs.get(requestedTabId)?.state ? tabs.get(requestedTabId).state : null,
     connectedTabs,
   }
@@ -1330,6 +1350,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         const state = await getPopupState(tabId, true)
         const wasAttached = state.activeTabState === 'connected'
         sendResponse({ ok: true, attached: wasAttached, ...state })
+        return
+      }
+
+      if (message.type === 'grais.popup.setTargetCreateEnabled') {
+        const enabled = message.enabled === true
+        await setAllowTargetCreatePref(enabled)
+        const state = await getPopupState(message.tabId, true)
+        sendResponse({ ok: true, ...state })
         return
       }
 

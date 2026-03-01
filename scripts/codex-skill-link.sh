@@ -2,8 +2,9 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
-CANONICAL_ROOT="${HOME}/.codex/skills/private"
-CANONICAL_SKILL_PATH="${CANONICAL_ROOT}/browser-relay"
+CANONICAL_ROOT="${HOME}/.agents/skills/private"
+CANONICAL_SKILL_PATH="${CANONICAL_ROOT}/agent-browser-relay"
+LEGACY_ALIAS_PATH="${CANONICAL_ROOT}/browser-relay"
 CANONICAL_EXTENSION_PATH="${CANONICAL_SKILL_PATH}/extension"
 
 MODE="install"
@@ -25,10 +26,13 @@ Usage:
   bash scripts/codex-skill-link.sh --force   # replace existing non-symlink path
 
 The script always links this repository to:
-  ~/.codex/skills/private/browser-relay
+  ~/.agents/skills/private/agent-browser-relay
 
 Then Chrome should load:
-  ~/.codex/skills/private/browser-relay/extension
+  ~/.agents/skills/private/agent-browser-relay/extension
+
+Compatibility alias:
+  ~/.agents/skills/private/browser-relay -> ~/.agents/skills/private/agent-browser-relay
 EOF
       exit 0
       ;;
@@ -56,6 +60,7 @@ resolve_link_target() {
 }
 
 mkdir -p "$CANONICAL_ROOT"
+NEED_CANONICAL_LINK=1
 
 if [[ "$MODE" == "check" ]]; then
   if [[ -L "$CANONICAL_SKILL_PATH" ]]; then
@@ -98,20 +103,34 @@ if [[ -d "$CANONICAL_SKILL_PATH" && ! -L "$CANONICAL_SKILL_PATH" ]]; then
     echo "[codex-skill] Reusing existing repository path at $CANONICAL_SKILL_PATH"
     echo "[codex-skill] Chrome load target:"
     echo "[codex-skill]   $CANONICAL_EXTENSION_PATH"
-    exit 0
-  fi
+    NEED_CANONICAL_LINK=0
+  else
+    if [[ "$FORCE" -ne 1 ]]; then
+      echo "[codex-skill] ERROR: $CANONICAL_SKILL_PATH exists and is a directory. Use --force to replace it." >&2
+      exit 2
+    fi
 
-  if [[ "$FORCE" -ne 1 ]]; then
-    echo "[codex-skill] ERROR: $CANONICAL_SKILL_PATH exists and is a directory. Use --force to replace it." >&2
-    exit 2
+    rm -rf "$CANONICAL_SKILL_PATH"
   fi
-
-  rm -rf "$CANONICAL_SKILL_PATH"
 fi
 
-ln -sfn "$REPO_ROOT" "$CANONICAL_SKILL_PATH"
+if [[ "$NEED_CANONICAL_LINK" -eq 1 ]]; then
+  ln -sfn "$REPO_ROOT" "$CANONICAL_SKILL_PATH"
+fi
+
+if [[ -e "$LEGACY_ALIAS_PATH" && ! -L "$LEGACY_ALIAS_PATH" ]]; then
+  if [[ "$FORCE" -ne 1 ]]; then
+    echo "[codex-skill] ERROR: legacy alias path exists and is a directory. Use --force to replace it: $LEGACY_ALIAS_PATH" >&2
+    exit 2
+  fi
+  rm -rf "$LEGACY_ALIAS_PATH"
+fi
+
+ln -sfn "$CANONICAL_SKILL_PATH" "$LEGACY_ALIAS_PATH"
 
 echo "[codex-skill] Linked skill workspace:"
 echo "[codex-skill]   $CANONICAL_SKILL_PATH -> $REPO_ROOT"
+echo "[codex-skill] Linked compatibility alias:"
+echo "[codex-skill]   $LEGACY_ALIAS_PATH -> $CANONICAL_SKILL_PATH"
 echo "[codex-skill] Chrome load target:"
 echo "[codex-skill]   $CANONICAL_EXTENSION_PATH"
