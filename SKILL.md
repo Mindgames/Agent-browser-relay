@@ -15,13 +15,7 @@ Defaults are set in code:
 - Attach timeout: `120000` ms
 Override per command with `--host`, `--port`, and `--attach-timeout-ms` when needed.
 
-1. Wire canonical skill path
-
-   ```bash
-   npm run codex:install
-   ```
-
-2. Install dependencies and start relay
+1. Install dependencies and start relay
 
    ```bash
    npm run relay:start -- --status-timeout-ms 3000
@@ -40,11 +34,11 @@ Override per command with `--host`, `--port`, and `--attach-timeout-ms` when nee
    node scripts/relay-manager.js start --auto-stop-ms 0
    ```
 
-3. Load extension from the `extension/` subfolder in Chrome
+2. Load extension in Chrome
 
    - `chrome://extensions`
    - Enable developer mode
-   - Load unpacked from `~/.agents/skills/private/agent-browser-relay/extension`
+   - Load unpacked from `~/agent-browser-relay/extension` (this is the visible folder created by the skill helper)
 
 3. Attach the extension to the target tab (open toolbar popup and click attach)
 
@@ -114,6 +108,19 @@ Override per command with `--host`, `--port`, and `--attach-timeout-ms` when nee
    ```
 
 ## Capabilities
+
+`read-active-tab.js` returns capability metadata in every successful payload under:
+
+`source.capabilities`
+
+Version compatibility checks are also included under `source.extension`:
+- `installedVersion`
+- `sourceVersion`
+- `relayVersion`
+- `observedExtensionVersion`
+- `versionMismatch`
+
+If a mismatch is detected, the command also prints a human-friendly update hint to stderr on every run.
 
 - `scripts/read-active-tab.js` default extraction: `url`, `title`, `text`, `links`, `metaDescription`.
 - Relay session leases (`--tab-id`) for concurrent agent isolation per tab on one relay port.

@@ -139,6 +139,12 @@ function summarizePortState(state) {
       : [],
     tabLeases: summarizeTabLeases(state),
     lastHeartbeatTs: state.extensionHeartbeatState?.ts || null,
+    extensionVersion: state.extensionHeartbeatState?.extensionVersion || null,
+    extensionName: state.extensionHeartbeatState?.extensionName || null,
+      extensionCapabilities:
+        state.extensionHeartbeatState?.extensionCapabilities && typeof state.extensionHeartbeatState.extensionCapabilities === 'object'
+          ? state.extensionHeartbeatState.extensionCapabilities
+          : null,
   }
 }
 
@@ -160,6 +166,12 @@ function getSinglePortStatus(state) {
       ? state.extensionHeartbeatState.attachedTabs
       : [],
     tabLeases: summarizeTabLeases(state),
+    extensionVersion: state.extensionHeartbeatState?.extensionVersion || null,
+    extensionName: state.extensionHeartbeatState?.extensionName || null,
+    extensionCapabilities:
+      state.extensionHeartbeatState?.extensionCapabilities && typeof state.extensionHeartbeatState.extensionCapabilities === 'object'
+        ? state.extensionHeartbeatState.extensionCapabilities
+        : null,
   }
 }
 
@@ -669,6 +681,10 @@ function onExtensionMessage(msg, socket, state) {
         : [],
       state: String(msg.state || 'attached'),
       status: String(msg.status || ''),
+      extensionVersion: typeof msg.extensionVersion === 'string' ? msg.extensionVersion : null,
+      extensionName: typeof msg.extensionName === 'string' ? msg.extensionName : null,
+      extensionCapabilities:
+        msg.extensionCapabilities && typeof msg.extensionCapabilities === 'object' ? msg.extensionCapabilities : null,
     }
     refreshExtensionSessionMap(state)
     return
