@@ -4,6 +4,47 @@
 const http = require('node:http')
 const fs = require('node:fs')
 const path = require('node:path')
+const { refreshInstallBundle } = require('./extension-install-helper')
+
+const PROJECT_RELEASES_URL = 'https://github.com/Mindgames/agent-browser-relay/releases/latest'
+
+const SKILL_CAPABILITIES = Object.freeze({
+  name: 'agent-browser-relay',
+  type: 'chrome-tab-read',
+  cliCapabilities: [
+    '--check',
+    '--check --wait-for-attach',
+    '--metadata',
+    '--screenshot',
+    '--screenshot-full-page',
+    '--expression',
+    '--preset',
+    '--tab-id',
+    '--wait-for-attach',
+  ],
+  relayMethods: [
+    'Grais.relay.openSession',
+    'Grais.relay.closeSession',
+    'Grais.relay.claimTab',
+    'Grais.relay.releaseTab',
+    'Grais.relay.listTabs',
+  ],
+  bridgeMethods: [
+    'Grais.debugger.ensureActiveTab',
+    'Grais.debugger.attachTab',
+    'Grais.debugger.getActiveTabMetadata',
+  ],
+  cdpMethods: [
+    'Runtime.evaluate',
+    'Runtime.enable',
+    'Page.captureScreenshot',
+    'Target.createTarget',
+    'Target.closeTarget',
+    'Target.activateTarget',
+  ],
+  presets: ['default', 'whatsapp', 'whatsapp-messages', 'wa', 'chat-audit', 'chat'],
+  extractorFields: ['url', 'title', 'text', 'links', 'metaDescription'],
+})
 
 const DEFAULT_PORT = 18793
 const DEFAULT_HOST = '127.0.0.1'
@@ -25,6 +66,18 @@ const PRESET_CHAT_AUDIT = 'chat-audit'
 
 const args = process.argv.slice(2)
 const options = parseArgs(args)
+
+let installBundle = {
+  ok: false,
+  path: null,
+  installedVersion: null,
+  sourceVersion: null,
+  relayVersion: null,
+  versionMismatch: false,
+  updated: false,
+  sourceMissing: false,
+  copyFailed: false,
+}
 
 if (options.help) {
   printUsage()
@@ -119,8 +172,15 @@ let activeSocket = false
 let rejectAllPending
 let relaySessionId = null
 let leasedTabId = Number.isInteger(requestedTabId) ? requestedTabId : null
+let relayStatusSnapshot = null
 
 function getRelaySource() {
+  const observedExtensionVersion = getObservedExtensionVersion()
+  const expectedExtensionVersion = installBundle.sourceVersion || installBundle.relayVersion || installBundle.installedVersion || null
+  const extensionMismatch =
+    typeof observedExtensionVersion === 'string' && typeof expectedExtensionVersion === 'string'
+      ? observedExtensionVersion !== expectedExtensionVersion
+      : false
   return {
     relayHost,
     relayPort,
@@ -128,7 +188,36 @@ function getRelaySource() {
     relayWebSocketUrl,
     relaySessionId,
     tabId: Number.isInteger(leasedTabId) ? leasedTabId : null,
+    capabilities: SKILL_CAPABILITIES,
+    extension: {
+      installPath: installBundle.path,
+      installedVersion: installBundle.installedVersion,
+      sourceVersion: installBundle.sourceVersion,
+      relayVersion: installBundle.relayVersion,
+      observedExtensionVersion,
+      expectedExtensionVersion,
+      observedCapabilities: relayStatusSnapshot?.extensionCapabilities
+        && typeof relayStatusSnapshot.extensionCapabilities === 'object'
+        ? relayStatusSnapshot.extensionCapabilities
+        : null,
+      observedVersionMismatch: extensionMismatch,
+      updated: Boolean(installBundle.updated),
+      versionMismatch: Boolean(installBundle.versionMismatch || extensionMismatch),
+      copyFailed: Boolean(installBundle.copyFailed),
+    },
   }
+}
+
+function getObservedExtensionVersion() {
+  if (!relayStatusSnapshot || typeof relayStatusSnapshot !== 'object') return null
+  if (typeof relayStatusSnapshot.extensionVersion === 'string') return relayStatusSnapshot.extensionVersion
+  if (!Array.isArray(relayStatusSnapshot.ports)) return null
+  for (const entry of relayStatusSnapshot.ports) {
+    if (!entry || typeof entry !== 'object') continue
+    if (Number(entry.port) !== relayPort) continue
+    if (typeof entry.extensionVersion === 'string') return entry.extensionVersion
+  }
+  return null
 }
 
 socket.addEventListener('open', () => {
@@ -1317,6 +1406,7 @@ function requestJson(url, timeoutMs = DEFAULT_STATUS_TIMEOUT_MS) {
 async function getRelayStatus(throwOnError = true) {
   try {
     const response = await requestJson(`${relayStatusUrl}?all=true`, statusTimeoutMs)
+    relayStatusSnapshot = typeof response === 'object' && response ? response : null
     return { ok: true, ...(typeof response === 'object' && response ? response : {}) }
   } catch (error) {
     if (throwOnError) {
@@ -1370,6 +1460,10 @@ function summarizeRelayPorts(statusPayload) {
         : null,
       activeTab: sanitizeStatusTab(raw.activeTab),
       attachedTabs: Array.isArray(raw.attachedTabs) ? raw.attachedTabs.map(sanitizeStatusTab).filter(Boolean) : [],
+      extensionVersion: typeof raw.extensionVersion === 'string' ? raw.extensionVersion : null,
+      extensionName: typeof raw.extensionName === 'string' ? raw.extensionName : null,
+      extensionCapabilities:
+        raw.extensionCapabilities && typeof raw.extensionCapabilities === 'object' ? raw.extensionCapabilities : null,
     })
   }
   ports.sort((a, b) => a.port - b.port)
@@ -1635,11 +1729,44 @@ async function waitForAttachmentReady(options = {}) {
 }
 
 async function main() {
+  try {
+    installBundle = refreshInstallBundle((message) => {
+      console.error(`[agent-browser-relay] ${message}`)
+    })
+  } catch {
+    installBundle = {
+      ok: false,
+      path: null,
+      installedVersion: null,
+      sourceVersion: null,
+      relayVersion: null,
+      versionMismatch: false,
+      updated: false,
+      sourceMissing: false,
+      copyFailed: true,
+    }
+  }
+
   const opened = await waitForSocket(4000)
   if (!opened) {
     console.error(`Failed to connect websocket ${wsUrl}`)
     process.exit(1)
   }
+
+  await getRelayStatus(false)
+    .then(() => {
+      const extension = getRelaySource().extension
+      if (!extension.versionMismatch) return
+      if (extension.observedExtensionVersion) {
+        console.error(
+          `[agent-browser-relay] Observed extension ${extension.observedExtensionVersion} does not match expected ${extension.expectedExtensionVersion}.`,
+        )
+      } else {
+        console.error(`[agent-browser-relay] Relay extension and relay package versions are out of sync.`)
+      }
+      console.error(`[agent-browser-relay] Download updated bundle from: ${PROJECT_RELEASES_URL}`)
+    })
+    .catch(() => {})
 
   rejectAllPending = (error) => {
     for (const [id, entry] of pending.entries()) {

@@ -1,11 +1,12 @@
 {
   "name": "agent-browser-relay",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.0.6",
   "bin": {
     "agent-browser-relay": "relay-server.js"
   },
   "scripts": {
+    "sync:extension-version": "node scripts/sync-extension-version.js",
     "lint": "node --check relay-server.js extension/background.js extension/options.js scripts/read-active-tab.js scripts/relay-manager.js scripts/relay-service.js",
     "knip": "node -e \"console.log('knip: not configured for this repository; skipped')\"",
     "build": "node --check relay-server.js extension/background.js extension/options.js scripts/read-active-tab.js scripts/relay-manager.js scripts/relay-service.js",
@@ -29,7 +30,13 @@
     "relay:global:update": "node scripts/relay-service.js restart",
     "relay:global:status": "node scripts/relay-service.js status",
     "codex:install": "bash scripts/codex-skill-link.sh",
-    "codex:install:check": "bash scripts/codex-skill-link.sh --check"
+    "codex:install:check": "bash scripts/codex-skill-link.sh --check",
+    "preversion": "node scripts/sync-extension-version.js",
+    "version": "node scripts/sync-extension-version.js",
+    "postversion": "git push && git push --tags",
+    "release:patch": "pnpm version patch",
+    "release:minor": "pnpm version minor",
+    "release:major": "pnpm version major"
   },
   "dependencies": {
     "ws": "^8.18.2"

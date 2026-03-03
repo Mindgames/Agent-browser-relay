@@ -12,6 +12,26 @@ const DEBUG_LOG = true
 const ALLOW_FOREGROUND_ACTIVATE_TARGET = false
 const RELAY_PORT_BY_TAB_KEY = 'relayPortByTab'
 const ALLOW_TARGET_CREATE_KEY = 'allowTargetCreate'
+const EXTENSION_CAPABILITIES = Object.freeze({
+  bridgeMethods: [
+    'Grais.debugger.ensureActiveTab',
+    'Grais.debugger.attachTab',
+    'Grais.debugger.getActiveTabMetadata',
+    'Grais.relay.openSession',
+    'Grais.relay.closeSession',
+    'Grais.relay.claimTab',
+    'Grais.relay.releaseTab',
+  ],
+  cdpMethods: [
+    'Runtime.enable',
+    'Runtime.evaluate',
+    'Page.captureScreenshot',
+    'Target.createTarget',
+    'Target.closeTarget',
+    'Target.activateTarget',
+  ],
+  presets: ['default', 'whatsapp', 'whatsapp-messages', 'wa', 'chat-audit', 'chat'],
+})
 
 const BADGE = {
   on: { text: 'ON', color: '#16A34A' },
@@ -525,6 +545,7 @@ async function sendRelayHeartbeat() {
   if (!relayWs || relayWs.readyState !== WebSocket.OPEN) return
   const activeTab = await buildActiveHeartbeatTab()
   const attachedTabs = await buildAttachedHeartbeatTabs()
+  const manifest = typeof chrome?.runtime?.getManifest === 'function' ? chrome.runtime.getManifest() : null
   refreshTabIndicator(activeTab?.tabId)
   const payload = {
     method: 'Grais.extensionHeartbeat',
@@ -534,6 +555,9 @@ async function sendRelayHeartbeat() {
     status: userAttachmentEnabled ? 'ON' : 'OFF',
     activeTab,
     attachedTabs,
+    extensionVersion: manifest && typeof manifest.version === 'string' ? manifest.version : null,
+    extensionName: manifest && typeof manifest.name === 'string' ? manifest.name : null,
+    extensionCapabilities: EXTENSION_CAPABILITIES,
   }
   sendToRelay(payload)
 }

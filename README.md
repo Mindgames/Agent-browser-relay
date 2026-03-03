@@ -33,14 +33,17 @@ npx skills add Mindgames/Agent-browser-relay -g -y
 ```
 
 ### 2) Load the extension in Chrome (Developer mode)
-After install, the skill is available at:
+After install with the `skills` installer, the skill is available at:
 `~/.agents/skills/agent-browser-relay`
 
 1. Open `chrome://extensions`
 2. Enable **Developer mode**
 3. Click **Load unpacked**
 4. Select this folder:
-   `~/.agents/skills/agent-browser-relay/extension`
+   `~/agent-browser-relay/extension`
+
+`read-active-tab.js` keeps this folder synced on first run and prints the install path + version
+sync status as stderr hints, so humans do not need to find hidden folders.
 5. Pin the **Agent Browser Relay** toolbar icon
 
 ### 3) Attach tabs and allow broader tab control
@@ -75,8 +78,8 @@ This repo integrates with two different skill roots:
   - Canonical global skill path for this relay project.
 - `~/.claude/skills/agent-browser-relay`
   - Usually symlinked automatically by the `skills` installer when Claude Code is present.
-- `~/.agents/skills/agent-browser-relay/extension`
-  - Exact Chrome extension directory to load in Developer mode.
+- `~/agent-browser-relay/extension`
+  - Visible Chrome extension directory printed by the skill and safe for manual navigation in Chrome.
 
 Why this matters: installer-based setup gives a stable path and keeps Codex/Claude integrations consistent.
 
@@ -87,6 +90,16 @@ Why this matters: installer-based setup gives a stable path and keeps Codex/Clau
 - `scripts/relay-service.js`: global `launchd/systemd --user` service lifecycle.
 - `scripts/read-active-tab.js`: read/check CLI that prints JSON.
 - Relay tab leasing (`--tab-id`): isolates concurrent agents to specific tabs.
+- `scripts/extension-install-helper.js`: keeps a visible extension install folder in sync.
+
+## Capability library exposed to callers
+
+`read-active-tab.js` includes a machine-readable capability block in each JSON payload (`source.capabilities`), including:
+- CLI switches (`--check`, `--metadata`, `--screenshot`, `--expression`, presets, `--tab-id`, etc.)
+- Relay methods used by the client (`Grais.relay.*`)
+- Bridge methods (`Grais.debugger.*`)
+- Common CDP methods exposed for extraction and screenshots
+- Installed/observed extension version metadata (`source.extension`) so tooling can warn on mismatches and redirect humans to updates.
 
 ## Relay Endpoint Defaults
 
