@@ -52,6 +52,17 @@ function writeInstallState(state) {
   }
 }
 
+function refreshVisiblePackageManifest() {
+  try {
+    const packageContent = fs.readFileSync(SOURCE_PACKAGE_PATH, 'utf8')
+    fs.rmSync(path.join(VISIBLE_EXTENSION_PATH, 'package.json'), { force: true })
+    fs.writeFileSync(path.join(VISIBLE_EXTENSION_PATH, 'package.json'), packageContent, 'utf8')
+    return
+  } catch {
+    // fallback: if source package cannot be read, keep destination as-is
+  }
+}
+
 function refreshInstallBundle(log = () => {}) {
   const sourceVersion = readManifestVersion(SOURCE_EXTENSION_PATH)
   const relayVersion = readPackageVersion()
@@ -60,6 +71,7 @@ function refreshInstallBundle(log = () => {}) {
 
   let installedVersion = readManifestVersion(VISIBLE_EXTENSION_PATH)
   let updated = false
+  let copyFailed = false
 
   if (!sourceVersion) {
     return {
@@ -70,8 +82,9 @@ function refreshInstallBundle(log = () => {}) {
       relayVersion,
       updated,
       firstRun: false,
-      versionMismatch: false,
+      versionMismatch: copyFailed,
       sourceMissing: true,
+      copyFailed,
     }
   }
 
@@ -81,10 +94,13 @@ function refreshInstallBundle(log = () => {}) {
       fs.rmSync(VISIBLE_EXTENSION_PATH, { recursive: true, force: true })
       fs.cpSync(SOURCE_EXTENSION_PATH, VISIBLE_EXTENSION_PATH, {
         recursive: true,
+        dereference: true,
       })
+      refreshVisiblePackageManifest()
       installedVersion = sourceVersion
       updated = true
     } catch {
+      copyFailed = true
       return {
         ok: false,
         path: VISIBLE_EXTENSION_PATH,
@@ -93,9 +109,9 @@ function refreshInstallBundle(log = () => {}) {
         relayVersion,
         updated,
         firstRun: false,
-        versionMismatch: false,
+        versionMismatch: copyFailed,
         sourceMissing: false,
-        copyFailed: true,
+        copyFailed,
       }
     }
   }
@@ -103,13 +119,24 @@ function refreshInstallBundle(log = () => {}) {
   const installedMissing = Boolean(sourceVersion && !installedVersion)
   const installedMismatch = Boolean(sourceVersion && installedVersion && sourceVersion !== installedVersion)
   const relayMismatch = Boolean(relayVersion && installedVersion && relayVersion !== installedVersion)
-  const mismatch = Boolean(installedMissing || installedMismatch || relayMismatch)
+  const mismatch = Boolean(installedMissing || installedMismatch || relayMismatch || copyFailed)
 
   const firstRun = state.firstRunSeen !== true
   const lastHintAt = Number.isFinite(Number(state.lastHintAt)) ? Number(state.lastHintAt) : 0
   const shouldPrintHint = mismatch || firstRun || (now - lastHintAt >= PROMPT_COOLDOWN_MS)
 
   if (shouldPrintHint) {
+    if (firstRun) {
+      log('[agent-browser-relay] First run setup for this machine:')
+      log('1) Open Chrome and visit chrome://extensions')
+      log('2) Enable Developer mode (top-right)')
+      log('3) Click "Load unpacked"')
+      log(`4) Select this folder:`)
+      log(`   ${VISIBLE_EXTENSION_PATH}`)
+      log('5) Pin Agent Browser Relay in the toolbar (optional but recommended)')
+      log('')
+    }
+
     log(`Chrome extension install path:`)
     log(`  ${VISIBLE_EXTENSION_PATH}`)
     log('Load this folder in chrome://extensions (Load unpacked).')
@@ -145,6 +172,7 @@ function refreshInstallBundle(log = () => {}) {
     firstRun,
     versionMismatch: mismatch,
     sourceMissing: false,
+    copyFailed,
   }
 }
 
