@@ -4,6 +4,7 @@
 const http = require('node:http')
 const fs = require('node:fs')
 const path = require('node:path')
+const os = require('node:os')
 const { refreshInstallBundle } = require('./extension-install-helper')
 
 const PROJECT_RELEASES_URL = 'https://github.com/Mindgames/agent-browser-relay/releases/latest'
@@ -1766,7 +1767,15 @@ async function main() {
       }
       console.error(`[agent-browser-relay] Download updated bundle from: ${PROJECT_RELEASES_URL}`)
     })
-    .catch(() => {})
+    .catch((error) => {
+      if (installBundle.copyFailed) {
+        console.error('[agent-browser-relay] Failed to sync the visible extension folder for Chrome install.')
+        console.error(`[agent-browser-relay] Verify write permissions for ${path.join(os.homedir(), 'agent-browser-relay')}.`)
+      }
+      if (error && !error.message.includes('ECONNREFUSED')) {
+        console.error(`[agent-browser-relay] Relay status check failed: ${error.message}`)
+      }
+    })
 
   rejectAllPending = (error) => {
     for (const [id, entry] of pending.entries()) {
