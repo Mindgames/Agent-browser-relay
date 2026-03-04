@@ -32,7 +32,7 @@
     "codex:install": "bash scripts/codex-skill-link.sh",
     "codex:install:check": "bash scripts/codex-skill-link.sh --check",
     "preversion": "node scripts/sync-extension-version.js",
-    "version": "node scripts/sync-extension-version.js",
+    "version": "node scripts/sync-extension-version.js && git add extension/manifest.json",
     "postversion": "git push && git push --tags",
     "release:patch": "pnpm version patch",
     "release:minor": "pnpm version minor",
