@@ -59,10 +59,11 @@ Override per command with `--host`, `--port`, and `--attach-timeout-ms` when nee
 4. Check readiness and attach state
 
    ```bash
-   node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --check --wait-for-attach --attach-timeout-ms "120000"
+   node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --tab-id "<TAB_ID>" --check --wait-for-attach --attach-timeout-ms "120000"
    ```
 
-   For multi-agent runs, include the assigned tab id:
+   Resolve `<TAB_ID>` from status first (`npm run relay:status -- --all --status-timeout-ms 3000`).
+   For all agent runs, use the assigned tab id:
 
    ```bash
    node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --tab-id "<TAB_ID>" --check --wait-for-attach --attach-timeout-ms "120000"
@@ -92,7 +93,7 @@ Override per command with `--host`, `--port`, and `--attach-timeout-ms` when nee
   - `curl --max-time 3 -sS "http://127.0.0.1:18793/status"`
   - `npm run relay:status -- --all --status-timeout-ms 3000`
 - After `relay:start`, pause and ask the human to attach the target tab before any read.
-- Run `node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --check --wait-for-attach --attach-timeout-ms "120000"` before reads and proceed only when it succeeds.
+- Run `node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --tab-id "<TAB_ID>" --check --wait-for-attach --attach-timeout-ms "120000"` before reads and proceed only when it succeeds.
 - For all agent runs (single-agent and concurrent), always pass `--tab-id <tabId>` on check/read commands so every operation is lease-scoped.
 - Do not stop/restart relay during the task unless the human requests it or recovery is explicitly required.
 - Do not restart relay only because code was updated locally; updates are applied on next explicit human-approved restart.
@@ -102,7 +103,7 @@ Override per command with `--host`, `--port`, and `--attach-timeout-ms` when nee
 5. Read structured tab payload
 
    ```bash
-   node scripts/read-active-tab.js
+   node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --tab-id "<TAB_ID>"
    ```
 
 6. Optional one-command smoke test

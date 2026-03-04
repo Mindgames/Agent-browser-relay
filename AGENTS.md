@@ -94,10 +94,11 @@ This refreshes sparse state and restores all missing tracked directories in the 
      - Open/focus the target tab in Chrome.
      - Open the toolbar popup and click **Attach this tab** so the badge shows `ON`.
    - The agent must wait for human confirmation before continuing.
+   - Resolve the target `tabId` from relay status (`/status` or `npm run relay:status -- --all --status-timeout-ms 3000`).
    - Before any read, the agent must run:
 
    ```bash
-   node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --check --wait-for-attach --attach-timeout-ms 120000
+   node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --tab-id "<TAB_ID>" --check --wait-for-attach --attach-timeout-ms 120000
    ```
 
    Continue only when this check succeeds.
@@ -123,7 +124,7 @@ This refreshes sparse state and restores all missing tracked directories in the 
 - Agent must not use direct browser automation/control tools (for example Playwright, Puppeteer, Selenium, `agent-browser`, or ad-hoc Chrome control scripts) for this workflow.
 - Agent must never take control of a random Chrome browser/profile/window; it may operate only on the explicitly attached and leased target tab.
 - After relay startup (`relay:global:start` / `relay:global:install` or `relay:start`), agent must stop and ask the human to attach the target tab, then wait for confirmation.
-- Agent must run `node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --check --wait-for-attach --attach-timeout-ms 120000` before any data read and continue only on success.
+- Agent must run `node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --tab-id "<TAB_ID>" --check --wait-for-attach --attach-timeout-ms 120000` before any data read and continue only on success.
 - For all agent runs (single-agent and concurrent), agent must use tab leasing by setting `--tab-id <tabId>` on all read/check commands.
 - Agent must resolve `tabId` from relay status (`/status` or `npm run relay:status -- --all`) and explicitly target that tab.
 - If the requested `tabId` is not present in status `attachedTabs`, agent must stop and ask the human to re-attach that tab before continuing.
