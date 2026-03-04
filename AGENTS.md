@@ -94,10 +94,11 @@ This refreshes sparse state and restores all missing tracked directories in the 
      - Open/focus the target tab in Chrome.
      - Open the toolbar popup and click **Attach this tab** so the badge shows `ON`.
    - The agent must wait for human confirmation before continuing.
+   - Resolve the target `tabId` from relay status (`/status` or `npm run relay:status -- --all --status-timeout-ms 3000`).
    - Before any read, the agent must run:
 
    ```bash
-   node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --check --wait-for-attach --attach-timeout-ms 120000
+   node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --tab-id "<TAB_ID>" --check --wait-for-attach --attach-timeout-ms 120000
    ```
 
    Continue only when this check succeeds.
@@ -119,10 +120,14 @@ This refreshes sparse state and restores all missing tracked directories in the 
   - `npm run relay:status`
   - `npm run relay:stop`
   - `node scripts/read-active-tab.js`
+- Gateway-only rule: agent must communicate with Chrome only via this relay gateway (`/status` + `node scripts/read-active-tab.js`).
+- Agent must not use direct browser automation/control tools (for example Playwright, Puppeteer, Selenium, `agent-browser`, or ad-hoc Chrome control scripts) for this workflow.
+- Agent must never take control of a random Chrome browser/profile/window; it may operate only on the explicitly attached and leased target tab.
 - After relay startup (`relay:global:start` / `relay:global:install` or `relay:start`), agent must stop and ask the human to attach the target tab, then wait for confirmation.
-- Agent must run `node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --check --wait-for-attach --attach-timeout-ms 120000` before any data read and continue only on success.
-- For multi-agent or concurrent runs, agent must use tab leasing by setting `--tab-id <tabId>` on all read/check commands.
+- Agent must run `node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --tab-id "<TAB_ID>" --check --wait-for-attach --attach-timeout-ms 120000` before any data read and continue only on success.
+- For all agent runs (single-agent and concurrent), agent must use tab leasing by setting `--tab-id <tabId>` on all read/check commands.
 - Agent must resolve `tabId` from relay status (`/status` or `npm run relay:status -- --all`) and explicitly target that tab.
+- If the requested `tabId` is not present in status `attachedTabs`, agent must stop and ask the human to re-attach that tab before continuing.
 - Agent must not stop/restart relay during a task unless the human explicitly asks for restart or a hard failure requires it.
 - Agent must not restart relay only because local code changed. Code updates are picked up only on explicit human-approved restart.
 - If the page shows human-verification gates (for example "Are you human?" or CAPTCHA), agent must stop immediately, alert the human with [$attention-please](/Users/mathiasasberg/.codex/skills/public/attention-please/SKILL.md), and wait for explicit human confirmation before continuing.
@@ -152,6 +157,8 @@ Never run bare `curl` without a timeout for relay checks.
    ```
 
    If relay is reachable this command waits for an active attachment instead of immediate failure.
+
+   Agent safety note: autonomous runs must use commands that include `--tab-id "<TAB_ID>"`. Unscoped variants below are manual/debug-only.
 
 6. Read default extraction from a specific leased tab:
 

@@ -59,10 +59,11 @@ Override per command with `--host`, `--port`, and `--attach-timeout-ms` when nee
 4. Check readiness and attach state
 
    ```bash
-   node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --check --wait-for-attach --attach-timeout-ms "120000"
+   node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --tab-id "<TAB_ID>" --check --wait-for-attach --attach-timeout-ms "120000"
    ```
 
-   For multi-agent runs, include the assigned tab id:
+   Resolve `<TAB_ID>` from status first (`npm run relay:status -- --all --status-timeout-ms 3000`).
+   For all agent runs, use the assigned tab id:
 
    ```bash
    node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --tab-id "<TAB_ID>" --check --wait-for-attach --attach-timeout-ms "120000"
@@ -79,6 +80,9 @@ Override per command with `--host`, `--port`, and `--attach-timeout-ms` when nee
 
 ## Mandatory behavior for agents
 - Use fixed commands from this repo. Do not try to "discover" alternate script names.
+- Gateway-only rule: always communicate through the local relay gateway (`/status` and `node scripts/read-active-tab.js`).
+- Never use direct browser-control tooling for this workflow (for example Playwright, Puppeteer, Selenium, `agent-browser`, or ad-hoc Chrome control scripts).
+- Never take control of a random Chrome window/profile. Only operate on the explicitly attached target tab leased via `--tab-id`.
 - Canonical commands:
   - `npm run relay:start`
   - `npm run relay:status`
@@ -89,16 +93,17 @@ Override per command with `--host`, `--port`, and `--attach-timeout-ms` when nee
   - `curl --max-time 3 -sS "http://127.0.0.1:18793/status"`
   - `npm run relay:status -- --all --status-timeout-ms 3000`
 - After `relay:start`, pause and ask the human to attach the target tab before any read.
-- Run `node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --check --wait-for-attach --attach-timeout-ms "120000"` before reads and proceed only when it succeeds.
-- For concurrent/multi-agent usage, always pass `--tab-id <tabId>` on check/read commands so each agent gets a tab lease.
+- Run `node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --tab-id "<TAB_ID>" --check --wait-for-attach --attach-timeout-ms "120000"` before reads and proceed only when it succeeds.
+- For all agent runs (single-agent and concurrent), always pass `--tab-id <tabId>` on check/read commands so every operation is lease-scoped.
 - Do not stop/restart relay during the task unless the human requests it or recovery is explicitly required.
 - Do not restart relay only because code was updated locally; updates are applied on next explicit human-approved restart.
+- If the requested `tabId` is missing from relay status `attachedTabs`, stop and ask the human to re-attach the target tab in the popup before continuing.
 - If the page shows human-verification gates (for example "Are you human?" or CAPTCHA), stop immediately, alert the human with [$attention-please](/Users/mathiasasberg/.codex/skills/public/attention-please/SKILL.md), and wait for explicit human confirmation before continuing.
 
 5. Read structured tab payload
 
    ```bash
-   node scripts/read-active-tab.js
+   node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --tab-id "<TAB_ID>"
    ```
 
 6. Optional one-command smoke test
@@ -136,6 +141,8 @@ If a mismatch is detected, the command also prints a human-friendly update hint 
 - WhatsApp/chat filters: `--message-regex`, `--exclude-message-regex`, `--sender-regex`, `--exclude-sender-regex`.
 
 ## Common command examples
+
+In agent workflows, use the `--tab-id` variants. Unscoped commands are for manual/local debugging only.
 
 ```bash
 node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --pretty false
