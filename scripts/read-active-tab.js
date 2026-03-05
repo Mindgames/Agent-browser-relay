@@ -15,6 +15,7 @@ const SKILL_CAPABILITIES = Object.freeze({
   cliCapabilities: [
     '--check',
     '--check --wait-for-attach',
+    '--check --require-target-create',
     '--metadata',
     '--screenshot',
     '--screenshot-full-page',
@@ -98,6 +99,7 @@ const maxRetries = parsePositiveInt(options.retries, DEFAULT_RETRIES, 'retries')
 const retryDelayMs = parsePositiveInt(options.retryDelayMs, DEFAULT_RETRY_DELAY_MS, 'retry-delay-ms')
 const checkOnly = options.check === true
 const waitForAttach = options.waitForAttach === true
+const requireTargetCreate = options.requireTargetCreate === true
 const metadataOnly = options.metadata === true
 const screenshotOnly =
   options.screenshot === true ||
@@ -279,6 +281,7 @@ function parseArgs(argv) {
     else if (arg === '--tab-id' && argv[i + 1]) out.tabId = argv[++i]
     else if (arg === '--pretty' && argv[i + 1]) out.pretty = argv[++i] !== 'false'
     else if (arg === '--wait-for-attach') out.waitForAttach = true
+    else if (arg === '--require-target-create') out.requireTargetCreate = true
     else if (arg === '--attach-timeout-ms' && argv[i + 1]) out.attachTimeoutMs = argv[++i]
     else if (arg === '--attach-poll-ms' && argv[i + 1]) out.attachPollMs = argv[++i]
     else if (arg === '--metadata') out.metadata = true
@@ -1444,6 +1447,7 @@ function summarizeRelayPorts(statusPayload) {
           queuedControllerCommands: statusPayload?.queuedControllerCommands,
           activeTab: statusPayload?.activeTab,
           attachedTabs: statusPayload?.attachedTabs,
+          allowTargetCreate: statusPayload?.allowTargetCreate,
         },
       ]
 
@@ -1465,6 +1469,7 @@ function summarizeRelayPorts(statusPayload) {
       extensionName: typeof raw.extensionName === 'string' ? raw.extensionName : null,
       extensionCapabilities:
         raw.extensionCapabilities && typeof raw.extensionCapabilities === 'object' ? raw.extensionCapabilities : null,
+      allowTargetCreate: typeof raw.allowTargetCreate === 'boolean' ? raw.allowTargetCreate : null,
     })
   }
   ports.sort((a, b) => a.port - b.port)
@@ -1550,6 +1555,7 @@ async function checkBridge() {
     ping: false,
     queueDepth: null,
     extensionLastSeenAgoMs: null,
+    targetCreateAllowed: null,
   }
   const extension = {
     connected: false,
@@ -1571,6 +1577,9 @@ async function checkBridge() {
       : Number.isFinite(Number(status.queuedControllerCommands))
         ? Number(status.queuedControllerCommands)
         : null
+    relay.targetCreateAllowed = typeof targetStatus?.allowTargetCreate === 'boolean'
+      ? targetStatus.allowTargetCreate
+      : null
     relay.activePorts = snapshot.activePorts
     relay.ports = snapshot.ports
 
@@ -1589,6 +1598,18 @@ async function checkBridge() {
 
     await sendRelayPing(timeoutMs)
     relay.ping = true
+
+    if (requireTargetCreate && relay.targetCreateAllowed !== true) {
+      extension.error = relay.targetCreateAllowed === false
+        ? 'Target.createTarget is disabled. Enable "Allow agent to open new background tabs" in the extension popup.'
+        : 'Target.createTarget readiness is unknown from relay status. Refresh the extension and retry.'
+      return {
+        ok: false,
+        relay,
+        extension,
+        source: getRelaySource(),
+      }
+    }
 
     try {
       if (Number.isInteger(requestedTabId)) {
@@ -1922,6 +1943,7 @@ function printUsage() {
   node read-active-tab.js [--host 127.0.0.1] [--port 18793] [--selector "body"] [--preset "default|whatsapp|whatsapp-messages|wa|chat-audit|chat"]
     [--tab-id 123]
     [--wait-for-attach] [--attach-timeout-ms 120000] [--attach-poll-ms 500]
+    [--require-target-create]
     [--status-timeout-ms 1200]
     [--metadata]
     [--screenshot] [--screenshot-path "./out/page.png"] [--screenshot-format "png|jpeg|webp"]
@@ -1936,6 +1958,7 @@ function printUsage() {
     [--retries 2] [--retry-delay-ms 400]
 
   --check: performs relay + extension handshake check only and exits.
+  --require-target-create: with --check, fails unless Target.createTarget is enabled in popup settings.
   --tab-id: binds this run to a specific Chrome tab id using a relay session lease.
   --metadata: fetches active tab URL/title metadata without forcing DOM attach.
   --screenshot: capture a screenshot via CDP Page.captureScreenshot.

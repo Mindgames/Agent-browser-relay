@@ -49,7 +49,7 @@ Override per command with `--host`, `--port`, and `--attach-timeout-ms` when nee
    If your `.agents` skill folder drops `extension/` after a `git fetch` or pull, repair it from the repo:
 
    ```bash
-   cd ~/.agents/skills/private/agent-browser-relay
+   cd ~/.agents/skills/agent-browser-relay 2>/dev/null || cd ~/.agents/skills/private/agent-browser-relay
    git sparse-checkout disable
    git config --unset-all core.sparseCheckout || true
    git config --unset-all core.sparseCheckoutCone || true
@@ -94,6 +94,7 @@ Override per command with `--host`, `--port`, and `--attach-timeout-ms` when nee
   - `npm run relay:status -- --all --status-timeout-ms 3000`
 - After `relay:start`, pause and ask the human to attach the target tab before any read.
 - Run `node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --tab-id "<TAB_ID>" --check --wait-for-attach --attach-timeout-ms "120000"` before reads and proceed only when it succeeds.
+- If the workflow will open tabs via `Target.createTarget`, run the same check with `--require-target-create` and proceed only when it succeeds.
 - For all agent runs (single-agent and concurrent), always pass `--tab-id <tabId>` on check/read commands so every operation is lease-scoped.
 - Do not stop/restart relay during the task unless the human requests it or recovery is explicitly required.
 - Do not restart relay only because code was updated locally; updates are applied on next explicit human-approved restart.
@@ -147,6 +148,7 @@ In agent workflows, use the `--tab-id` variants. Unscoped commands are for manua
 ```bash
 node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --pretty false
 node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --tab-id 123 --pretty false
+node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --tab-id 123 --check --wait-for-attach --require-target-create --attach-timeout-ms 120000
 node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --expression "document.documentElement.outerHTML"
 node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --screenshot --screenshot-full-page --screenshot-path "./tmp/page.png"
 node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --preset whatsapp-messages --max-messages 200 --selector "#main"

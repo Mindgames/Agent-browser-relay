@@ -553,6 +553,7 @@ async function sendRelayHeartbeat() {
     relayPort: currentRelayPort,
     state: userAttachmentEnabled ? 'attached' : 'detached',
     status: userAttachmentEnabled ? 'ON' : 'OFF',
+    allowTargetCreate,
     activeTab,
     attachedTabs,
     extensionVersion: manifest && typeof manifest.version === 'string' ? manifest.version : null,
