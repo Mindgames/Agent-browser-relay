@@ -689,7 +689,7 @@ function onExtensionMessage(msg, socket, state) {
         : [],
       state: String(msg.state || 'attached'),
       status: String(msg.status || ''),
-      allowTargetCreate: msg.allowTargetCreate === true,
+      allowTargetCreate: typeof msg.allowTargetCreate === 'boolean' ? msg.allowTargetCreate : null,
       extensionVersion: typeof msg.extensionVersion === 'string' ? msg.extensionVersion : null,
       extensionName: typeof msg.extensionName === 'string' ? msg.extensionName : null,
       extensionCapabilities:
