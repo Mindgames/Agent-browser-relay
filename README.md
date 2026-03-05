@@ -95,7 +95,7 @@ Why this matters: installer-based setup gives a stable path and keeps Codex/Clau
 ## Capability library exposed to callers
 
 `read-active-tab.js` includes a machine-readable capability block in each JSON payload (`source.capabilities`), including:
-- CLI switches (`--check`, `--metadata`, `--screenshot`, `--expression`, presets, `--tab-id`, etc.)
+- CLI switches (`--check`, `--check --require-target-create`, `--metadata`, `--screenshot`, `--expression`, presets, `--tab-id`, etc.)
 - Relay methods used by the client (`Grais.relay.*`)
 - Bridge methods (`Grais.debugger.*`)
 - Common CDP methods exposed for extraction and screenshots
@@ -160,6 +160,12 @@ For multi-agent runs, always target a specific tab lease:
 node scripts/read-active-tab.js --tab-id "<TAB_ID>" --check --wait-for-attach --attach-timeout-ms 120000
 ```
 
+If your workflow will open background tabs via `Target.createTarget`, require that readiness explicitly:
+
+```bash
+node scripts/read-active-tab.js --tab-id "<TAB_ID>" --check --wait-for-attach --require-target-create --attach-timeout-ms 120000
+```
+
 ## Health Check (Timeout Required)
 
 Never run bare `curl` for relay checks. Use timeout:
@@ -171,6 +177,7 @@ curl --max-time 3 -sS "http://127.0.0.1:18793/status"
 Continue only when status reports:
 - `extensionConnected: true`
 - low queue depth
+- for tab-spawn workflows: `allowTargetCreate: true` (or run `--check --require-target-create`)
 
 ## Read Data
 

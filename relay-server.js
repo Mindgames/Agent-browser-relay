@@ -141,10 +141,14 @@ function summarizePortState(state) {
     lastHeartbeatTs: state.extensionHeartbeatState?.ts || null,
     extensionVersion: state.extensionHeartbeatState?.extensionVersion || null,
     extensionName: state.extensionHeartbeatState?.extensionName || null,
-      extensionCapabilities:
-        state.extensionHeartbeatState?.extensionCapabilities && typeof state.extensionHeartbeatState.extensionCapabilities === 'object'
-          ? state.extensionHeartbeatState.extensionCapabilities
-          : null,
+    extensionCapabilities:
+      state.extensionHeartbeatState?.extensionCapabilities && typeof state.extensionHeartbeatState.extensionCapabilities === 'object'
+        ? state.extensionHeartbeatState.extensionCapabilities
+        : null,
+    allowTargetCreate:
+      typeof state.extensionHeartbeatState?.allowTargetCreate === 'boolean'
+        ? state.extensionHeartbeatState.allowTargetCreate
+        : null,
   }
 }
 
@@ -171,6 +175,10 @@ function getSinglePortStatus(state) {
     extensionCapabilities:
       state.extensionHeartbeatState?.extensionCapabilities && typeof state.extensionHeartbeatState.extensionCapabilities === 'object'
         ? state.extensionHeartbeatState.extensionCapabilities
+        : null,
+    allowTargetCreate:
+      typeof state.extensionHeartbeatState?.allowTargetCreate === 'boolean'
+        ? state.extensionHeartbeatState.allowTargetCreate
         : null,
   }
 }
@@ -681,6 +689,7 @@ function onExtensionMessage(msg, socket, state) {
         : [],
       state: String(msg.state || 'attached'),
       status: String(msg.status || ''),
+      allowTargetCreate: msg.allowTargetCreate === true,
       extensionVersion: typeof msg.extensionVersion === 'string' ? msg.extensionVersion : null,
       extensionName: typeof msg.extensionName === 'string' ? msg.extensionName : null,
       extensionCapabilities:
