@@ -32,7 +32,7 @@ For unattended global install (recommended in automations/scripts):
 npx skills add Mindgames/Agent-browser-relay -g -y
 ```
 
-On a fresh machine, the first `npm run relay:start` or `npm run relay:global:install` also syncs a visible Chrome extension folder to `~/agent-browser-relay/extension` and prints that path. Load that folder in Chrome before debugging attach/read failures.
+On a fresh machine, install now creates a visible Chrome extension folder at `~/agent-browser-relay/extension` during `npm install` / `skills add`. Runtime commands such as `npm run relay:start` and `npm run relay:global:install` still refresh that folder and print the path as a backup.
 
 ### 2) Load the extension in Chrome (Developer mode)
 After install with the `skills` installer, the skill is available at:
@@ -45,6 +45,7 @@ After install with the `skills` installer, the skill is available at:
    `~/agent-browser-relay/extension`
 
 `relay:start`, `relay:global:install`, and `read-active-tab.js` keep this folder synced and print the install path + version sync status as stderr hints, so humans do not need to find hidden folders.
+If the folder is missing after install, run `npm run extension:install` from the installed skill directory and then load it in Chrome.
 5. Pin the **Agent Browser Relay** toolbar icon
 
 ### 3) Attach tabs and allow broader tab control
@@ -236,6 +237,10 @@ npm run relay:status -- --status-timeout-ms 3000
 - Relay start timed out:
   - Read the startup error and relay log printed by `npm run relay:start`.
   - Do not assume sandbox/network restrictions unless the output shows an actual permission error.
+
+- Visible extension folder missing after install:
+  - Run `npm run extension:install` from the installed skill directory.
+  - Confirm `~/agent-browser-relay/extension` now exists, then load that folder in `chrome://extensions`.
 
 - Attachment lost after navigation/reload:
   - Re-open popup on that tab.

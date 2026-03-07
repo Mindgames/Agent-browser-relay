@@ -39,13 +39,18 @@ Default host/port is `127.0.0.1:18793` (set in code). Override per command with 
      ```
    - If you installed via `npx skills add`, your skill path is typically:
      `~/.agents/skills/agent-browser-relay`
+   - Install now also creates a visible Chrome extension folder at:
+     `~/agent-browser-relay/extension`
    - Chrome → `chrome://extensions`
    - Enable Developer mode
    - Load unpacked and select one of:
+     - `~/agent-browser-relay/extension` (preferred visible path created during install)
      - `~/.agents/skills/agent-browser-relay/extension` (global `skills add` install)
      - `~/.agents/skills/private/agent-browser-relay/extension` (`npm run codex:install` compat path)
    - Pin Agent Browser Relay icon to the toolbar
    - Run `npm install` once if this checkout has never installed dependencies.
+   - If `~/agent-browser-relay/extension` is missing after install, run:
+     `npm run extension:install`
 2. Start relay server in global mode (preferred, always-on):
 
    ```bash
