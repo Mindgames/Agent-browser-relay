@@ -71,6 +71,7 @@ async function run(commandName) {
         )
       }
     }
+    await printExtensionConnectionGuidance()
     return
   }
   if (commandName === 'uninstall') {
@@ -79,6 +80,7 @@ async function run(commandName) {
   }
   if (commandName === 'start') {
     startService()
+    await printExtensionConnectionGuidance()
     return
   }
   if (commandName === 'stop') {
@@ -93,6 +95,7 @@ async function run(commandName) {
     if (waitForReady && readyTimeoutMs > 0) {
       await awaitServiceReady()
     }
+    await printExtensionConnectionGuidance()
     return
   }
   if (commandName === 'status') {
@@ -241,6 +244,34 @@ async function printStatus() {
   }
 
   console.log(JSON.stringify(payload, null, 2))
+}
+
+async function printExtensionConnectionGuidance() {
+  const targetPort = ports[0] || RELAY_PORT_DEFAULT
+  const status = await getRelayStatusByPort(targetPort)
+
+  if (!status.ok) {
+    console.warn(
+      [
+        `[agent-browser-relay] Relay is not reachable yet on port ${targetPort}, so Chrome extension load cannot be confirmed yet.`,
+        `[agent-browser-relay] Once the relay is up, run: npm run extension:status -- --port "${targetPort}" --status-timeout-ms ${statusTimeoutMs}`,
+      ].join('\n'),
+    )
+    return
+  }
+
+  if (status.payload?.extensionConnected === true) {
+    console.log(`[agent-browser-relay] Chrome extension is connected on relay port ${targetPort}.`)
+    return
+  }
+
+  console.warn(
+    [
+      `[agent-browser-relay] Relay is up, but Chrome extension load is not confirmed on port ${targetPort}.`,
+      'Open the Agent Browser Relay popup once in Chrome to wake the extension, then run:',
+      `[agent-browser-relay]   npm run extension:status -- --port "${targetPort}" --status-timeout-ms ${statusTimeoutMs}`,
+    ].join('\n'),
+  )
 }
 
 async function awaitServiceReady() {

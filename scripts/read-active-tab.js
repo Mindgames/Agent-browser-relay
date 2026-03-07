@@ -1528,7 +1528,7 @@ async function assertRelayConnectionReady() {
   if (!targetStatus || !targetStatus.extensionConnected) {
     assertNoPortMismatch(snapshot)
     throw new Error(
-      `Relay is reachable (${relayStatusUrl}) but extension is not connected. Open the target tab and click Agent Browser Relay.`,
+      `Relay is reachable (${relayStatusUrl}) but extension is not connected. Open the Agent Browser Relay popup once to confirm it is loaded, then click Attach this tab on the target tab.`,
     )
   }
 }
@@ -1600,7 +1600,7 @@ async function checkBridge() {
       const mismatchHint = buildPortMismatchHint(snapshot)
       extension.error =
         mismatchHint ||
-        'Extension is not connected to relay.'
+        'Extension is not connected to relay. Open the Agent Browser Relay popup once to confirm it is loaded, then click Attach this tab.'
       return {
         ok: false,
         relay,

@@ -47,6 +47,7 @@ Default host/port is `127.0.0.1:18793` (set in code). Override per command with 
      - `~/.agents/skills/agent-browser-relay/extension` (global `skills add` install)
      - `~/.agents/skills/private/agent-browser-relay/extension` (`npm run codex:install` compat path)
    - `npm run extension:path` prints the exact current primary load path again
+   - After relay startup, open the popup once and use `npm run extension:status` to confirm Chrome actually loaded the extension
    - Pin Agent Browser Relay icon to the toolbar
    - Run `npm install` once if this checkout has never installed dependencies.
    - `~/agent-browser-relay/extension` is only an optional visible convenience copy. If you want it, run:
@@ -107,7 +108,14 @@ This refreshes sparse state and restores all missing tracked directories in the 
    ```
 
 6. Human attach gate (required for agent workflows):
-   - After relay is started, the agent must pause and ask the human to attach the target tab:
+   - After relay is started, the agent must first pause and ask the human to open the extension popup once so Chrome wakes the extension.
+   - The agent must confirm extension load with:
+
+   ```bash
+   npm run extension:status -- --wait-for-connected --connected-timeout-ms 120000
+   ```
+
+   - Only after that succeeds may the agent ask the human to attach the target tab:
      - Open/focus the target tab in Chrome.
      - Open the toolbar popup and click **Attach this tab** so the badge shows `ON`.
    - The agent must wait for human confirmation before continuing.
@@ -136,6 +144,7 @@ This refreshes sparse state and restores all missing tracked directories in the 
 ## Agent execution contract (mandatory)
 - Use these exact scripts and command names. Do not search for alternatives and do not say they "may be named differently":
   - `npm run extension:path`
+  - `npm run extension:status`
   - `npm run relay:global:install`
   - `npm run relay:global:status`
   - `npm run relay:global:start`
@@ -148,7 +157,8 @@ This refreshes sparse state and restores all missing tracked directories in the 
 - Agent must not use direct browser automation/control tools (for example Playwright, Puppeteer, Selenium, `agent-browser`, or ad-hoc Chrome control scripts) for this workflow.
 - Agent must never take control of a random Chrome browser/profile/window; it may operate only on the explicitly attached and leased target tab.
 - On a fresh machine, agent must tell the human to load the primary extension path from `npm run extension:path` before attach/read steps. After `skills add`, that is normally `~/.agents/skills/agent-browser-relay/extension`.
-- After relay startup (`relay:global:start` / `relay:global:install` or `relay:start`), agent must stop and ask the human to attach the target tab, then wait for confirmation.
+- After relay startup (`relay:global:start` / `relay:global:install` or `relay:start`), agent must stop and ask the human to open the popup once, then run `npm run extension:status -- --wait-for-connected --connected-timeout-ms 120000`.
+- Only after `extension:status` succeeds may the agent ask the human to attach the target tab, then wait for confirmation.
 - Agent must run `node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --tab-id "<TAB_ID>" --check --wait-for-attach --attach-timeout-ms 120000` before any data read and continue only on success.
 - For workflows that create tabs with `Target.createTarget`, agent must additionally require target-create readiness via `--require-target-create`.
 - For all agent runs (single-agent and concurrent), agent must use tab leasing by setting `--tab-id <tabId>` on all read/check commands.
@@ -170,10 +180,12 @@ Never run bare `curl` without a timeout for relay checks.
 
 ## Workflow
 1. Open and focus the target tab(s) in Chrome.
-2. Open the Agent Browser Relay popup and click "Attach this tab" for each tab an agent should use.
-3. Resolve each target `tabId` from status output (`npm run relay:status -- --all --status-timeout-ms 3000`).
-4. Optional: spawn a new tab via relay CDP forwarding (`Target.createTarget`), then re-run status and resolve the new `tabId`.
-5. Validate readiness before each read:
+2. Open the Agent Browser Relay popup once so Chrome wakes the extension.
+3. Confirm extension load with `npm run extension:status -- --wait-for-connected --connected-timeout-ms 120000`.
+4. Open the Agent Browser Relay popup and click "Attach this tab" for each tab an agent should use.
+5. Resolve each target `tabId` from status output (`npm run relay:status -- --all --status-timeout-ms 3000`).
+6. Optional: spawn a new tab via relay CDP forwarding (`Target.createTarget`), then re-run status and resolve the new `tabId`.
+7. Validate readiness before each read:
 
    ```bash
    node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --tab-id "<TAB_ID>" --check

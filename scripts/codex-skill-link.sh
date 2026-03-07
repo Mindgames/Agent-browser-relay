@@ -165,3 +165,5 @@ else
 fi
 echo "[codex-skill] To print the exact current load path again:"
 echo "[codex-skill]   npm run extension:path"
+echo "[codex-skill] After relay startup, confirm Chrome has loaded the extension with:"
+echo "[codex-skill]   npm run extension:status -- --wait-for-connected --connected-timeout-ms 120000"
