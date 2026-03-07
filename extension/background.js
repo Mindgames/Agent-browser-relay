@@ -66,6 +66,8 @@ let userAttachmentEnabled = false
 let userPinnedTabId = null
 /** @type {boolean} */
 let allowTargetCreate = false
+/** @type {Promise<{shouldBeAttached:boolean, pinnedTabId:number|null}>|null} */
+let preferenceStateLoadPromise = null
 
 let nextSession = 1
 let currentRelayPort = DEFAULT_PORT
@@ -176,6 +178,31 @@ async function getAllowTargetCreatePref() {
 async function setAllowTargetCreatePref(enabled) {
   allowTargetCreate = Boolean(enabled)
   await chrome.storage.local.set({ [ALLOW_TARGET_CREATE_KEY]: allowTargetCreate })
+}
+
+async function loadPreferenceStateFromStorage() {
+  const [shouldBeAttached, pinnedTabPref, allowTargetCreatePref] = await Promise.all([
+    getUserAttachmentPref(),
+    getPinnedTabPref(),
+    getAllowTargetCreatePref(),
+  ])
+  userAttachmentEnabled = Boolean(shouldBeAttached)
+  userPinnedTabId = pinnedTabPref
+  allowTargetCreate = Boolean(allowTargetCreatePref)
+  return {
+    shouldBeAttached: userAttachmentEnabled,
+    pinnedTabId: userPinnedTabId,
+  }
+}
+
+function ensurePreferenceStateLoaded() {
+  if (!preferenceStateLoadPromise) {
+    preferenceStateLoadPromise = loadPreferenceStateFromStorage().catch((error) => {
+      preferenceStateLoadPromise = null
+      throw error
+    })
+  }
+  return preferenceStateLoadPromise
 }
 
 async function disableAttachmentState() {
@@ -966,6 +993,7 @@ async function connectOrToggleForActiveTab(tab) {
 
 async function handleForwardCdpCommand(msg) {
   dbg('handleForwardCdpCommand.start', { id: msg?.id, method: msg?.params?.method })
+  await ensurePreferenceStateLoaded()
   const method = String(msg?.params?.method || '').trim()
   const params = msg?.params?.params || undefined
   const sessionId = typeof msg?.params?.sessionId === 'string' ? msg.params.sessionId : undefined
@@ -1171,20 +1199,13 @@ async function handleForwardCdpCommand(msg) {
 
 async function initializeAttachmentState() {
   try {
-    const [shouldBeAttached, pinnedTabPref, allowTargetCreatePref] = await Promise.all([
-      getUserAttachmentPref(),
-      getPinnedTabPref(),
-      getAllowTargetCreatePref(),
-    ])
-    userAttachmentEnabled = Boolean(shouldBeAttached)
-    userPinnedTabId = pinnedTabPref
-    allowTargetCreate = Boolean(allowTargetCreatePref)
-    if (!shouldBeAttached) return
-    if (!Number.isInteger(userPinnedTabId)) {
+    const prefs = await ensurePreferenceStateLoaded()
+    if (!prefs.shouldBeAttached) return
+    if (!Number.isInteger(prefs.pinnedTabId)) {
       await disableAttachmentState()
       return
     }
-    const pinnedTab = await chrome.tabs.get(userPinnedTabId).catch(() => null)
+    const pinnedTab = await chrome.tabs.get(prefs.pinnedTabId).catch(() => null)
     if (!pinnedTab?.id) {
       await disableAttachmentState()
       return
@@ -1267,7 +1288,8 @@ chrome.action.onClicked.addListener((tab) => void connectOrToggleForActiveTab(ta
 
 void initializeAttachmentState()
 
-chrome.runtime.onInstalled.addListener(() => {
+chrome.runtime.onInstalled.addListener((details) => {
+  if (details?.reason !== 'install') return
   void Promise.allSettled([
     setUserAttachmentPref(false),
     setPinnedTabPref(null),
@@ -1278,6 +1300,7 @@ chrome.runtime.onInstalled.addListener(() => {
 })
 
 async function getPopupState(tabId, includeAllTabs = true) {
+  await ensurePreferenceStateLoaded()
   const requestedTabId = normalizeTabId(tabId)
   const relayConnected = relayWs && relayWs.readyState === WebSocket.OPEN
   const { defaultPort, tabPorts } = await getRelayPortConfig()
@@ -1334,6 +1357,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   void (async () => {
     try {
+      await ensurePreferenceStateLoaded()
       if (message.type === 'grais.popup.getState') {
         const state = await getPopupState(message.tabId, Boolean(message.includeAllTabs))
         sendResponse({ ok: true, ...state })
