@@ -9,6 +9,11 @@ const REPO_ROOT = path.resolve(__dirname, '..')
 const SOURCE_EXTENSION_PATH = path.join(REPO_ROOT, 'extension')
 const SOURCE_PACKAGE_PATH = path.join(REPO_ROOT, 'package.json')
 
+const GLOBAL_SKILL_ROOT = path.join(os.homedir(), '.agents', 'skills', 'agent-browser-relay')
+const GLOBAL_EXTENSION_PATH = path.join(GLOBAL_SKILL_ROOT, 'extension')
+const PRIVATE_SKILL_ROOT = path.join(os.homedir(), '.agents', 'skills', 'private', 'agent-browser-relay')
+const PRIVATE_EXTENSION_PATH = path.join(PRIVATE_SKILL_ROOT, 'extension')
+
 const VISIBLE_ROOT = path.join(os.homedir(), 'agent-browser-relay')
 const VISIBLE_EXTENSION_PATH = path.join(VISIBLE_ROOT, 'extension')
 const VISIBLE_STATE_PATH = path.join(VISIBLE_ROOT, 'extension-install-state.json')
@@ -52,43 +57,62 @@ function writeInstallState(state) {
   }
 }
 
+function safeRealpath(targetPath) {
+  try {
+    return fs.realpathSync(targetPath)
+  } catch {
+    return null
+  }
+}
+
 function refreshVisiblePackageManifest() {
   try {
     const packageContent = fs.readFileSync(SOURCE_PACKAGE_PATH, 'utf8')
     fs.rmSync(path.join(VISIBLE_EXTENSION_PATH, 'package.json'), { force: true })
     fs.writeFileSync(path.join(VISIBLE_EXTENSION_PATH, 'package.json'), packageContent, 'utf8')
-    return
   } catch {
     // fallback: if source package cannot be read, keep destination as-is
   }
 }
 
-function refreshInstallBundle(log = () => {}) {
-  const sourceVersion = readManifestVersion(SOURCE_EXTENSION_PATH)
-  const relayVersion = readPackageVersion()
-  const state = readInstallState()
-  const now = Date.now()
+function resolvePrimaryLoadTarget() {
+  const sourceRealPath = safeRealpath(SOURCE_EXTENSION_PATH)
+  const candidates = [
+    { path: GLOBAL_EXTENSION_PATH, kind: 'global-skill' },
+    { path: PRIVATE_EXTENSION_PATH, kind: 'private-skill' },
+    { path: SOURCE_EXTENSION_PATH, kind: 'checkout' },
+  ]
 
-  let installedVersion = readManifestVersion(VISIBLE_EXTENSION_PATH)
+  for (const candidate of candidates) {
+    const candidateRealPath = safeRealpath(candidate.path)
+    if (sourceRealPath && candidateRealPath && candidateRealPath === sourceRealPath) {
+      return candidate
+    }
+  }
+
+  return { path: SOURCE_EXTENSION_PATH, kind: 'checkout' }
+}
+
+function describePrimaryLoadPathKind(kind) {
+  if (kind === 'global-skill') return 'global skills install'
+  if (kind === 'private-skill') return 'Codex compatibility install'
+  return 'current checkout'
+}
+
+function prepareVisibleExtensionCopy(sourceVersion) {
+  let visibleVersion = readManifestVersion(VISIBLE_EXTENSION_PATH)
   let updated = false
   let copyFailed = false
 
   if (!sourceVersion) {
     return {
-      ok: false,
-      path: VISIBLE_EXTENSION_PATH,
-      installedVersion,
-      sourceVersion,
-      relayVersion,
+      visibleVersion,
       updated,
-      firstRun: false,
-      versionMismatch: copyFailed,
-      sourceMissing: true,
       copyFailed,
     }
   }
 
-  if (!installedVersion || installedVersion !== sourceVersion) {
+  if (!visibleVersion || visibleVersion !== sourceVersion) {
     try {
       fs.mkdirSync(VISIBLE_ROOT, { recursive: true })
       fs.rmSync(VISIBLE_EXTENSION_PATH, { recursive: true, force: true })
@@ -97,110 +121,261 @@ function refreshInstallBundle(log = () => {}) {
         dereference: true,
       })
       refreshVisiblePackageManifest()
-      installedVersion = sourceVersion
+      visibleVersion = sourceVersion
       updated = true
     } catch {
       copyFailed = true
-      return {
-        ok: false,
-        path: VISIBLE_EXTENSION_PATH,
-        installedVersion,
-        sourceVersion,
-        relayVersion,
-        updated,
-        firstRun: false,
-        versionMismatch: copyFailed,
-        sourceMissing: false,
-        copyFailed,
-      }
+      visibleVersion = readManifestVersion(VISIBLE_EXTENSION_PATH)
     }
   }
 
-  const installedMissing = Boolean(sourceVersion && !installedVersion)
-  const installedMismatch = Boolean(sourceVersion && installedVersion && sourceVersion !== installedVersion)
-  const relayMismatch = Boolean(relayVersion && installedVersion && relayVersion !== installedVersion)
-  const mismatch = Boolean(installedMissing || installedMismatch || relayMismatch || copyFailed)
+  return {
+    visibleVersion,
+    updated,
+    copyFailed,
+  }
+}
 
+function refreshInstallBundle(log = () => {}, options = {}) {
+  const prepareVisible = options.prepareVisible !== false
+  const printHint = options.printHint !== false
+
+  const sourceVersion = readManifestVersion(SOURCE_EXTENSION_PATH)
+  const relayVersion = readPackageVersion()
+  const primaryTarget = resolvePrimaryLoadTarget()
+  const primaryVersion =
+    primaryTarget.path === SOURCE_EXTENSION_PATH
+      ? sourceVersion
+      : readManifestVersion(primaryTarget.path)
+
+  let visibleVersion = readManifestVersion(VISIBLE_EXTENSION_PATH)
+  let updated = false
+  let copyFailed = false
+
+  if (!sourceVersion) {
+    return {
+      ok: false,
+      path: primaryTarget.path,
+      pathKind: primaryTarget.kind,
+      sourcePath: SOURCE_EXTENSION_PATH,
+      visiblePath: VISIBLE_EXTENSION_PATH,
+      installedVersion: primaryVersion,
+      visibleVersion,
+      sourceVersion,
+      relayVersion,
+      updated,
+      firstRun: false,
+      versionMismatch: false,
+      sourceMissing: true,
+      copyFailed,
+      visiblePathReady: false,
+      visiblePathNeedsRefresh: false,
+    }
+  }
+
+  if (prepareVisible) {
+    const visibleCopy = prepareVisibleExtensionCopy(sourceVersion)
+    visibleVersion = visibleCopy.visibleVersion
+    updated = visibleCopy.updated
+    copyFailed = visibleCopy.copyFailed
+  }
+
+  const visiblePathReady = Boolean(sourceVersion && visibleVersion && visibleVersion === sourceVersion)
+  const visiblePathNeedsRefresh = Boolean(sourceVersion && (!visibleVersion || visibleVersion !== sourceVersion))
+  const versionMismatch = Boolean(primaryVersion && relayVersion && primaryVersion !== relayVersion)
+
+  const state = readInstallState()
+  const now = Date.now()
   const firstRun = state.firstRunSeen !== true
   const lastHintAt = Number.isFinite(Number(state.lastHintAt)) ? Number(state.lastHintAt) : 0
-  const shouldPrintHint = mismatch || firstRun || (now - lastHintAt >= PROMPT_COOLDOWN_MS)
+  const shouldPrintHint =
+    versionMismatch ||
+    copyFailed ||
+    visiblePathNeedsRefresh ||
+    firstRun ||
+    (now - lastHintAt >= PROMPT_COOLDOWN_MS)
 
-  if (shouldPrintHint) {
+  if (printHint && shouldPrintHint) {
     if (firstRun) {
       log('First run setup for this machine:')
       log('1) Open Chrome and visit chrome://extensions')
       log('2) Enable Developer mode (top-right)')
       log('3) Click "Load unpacked"')
-      log(`4) Select this folder:`)
-      log(`   ${VISIBLE_EXTENSION_PATH}`)
+      log('4) Select this folder:')
+      log(`   ${primaryTarget.path}`)
       log('5) Pin Agent Browser Relay in the toolbar (optional but recommended)')
       log('')
     }
 
-    log(`Chrome extension install path:`)
-    log(`  ${VISIBLE_EXTENSION_PATH}`)
+    log('Primary Chrome extension path:')
+    log(`  ${primaryTarget.path}`)
+    log(`This is the guaranteed extension folder from the ${describePrimaryLoadPathKind(primaryTarget.kind)}.`)
     log('Load this folder in chrome://extensions (Load unpacked).')
-    log('If the extension was previously loaded from another folder, repoint it here.')
-    log(`Extension version: ${installedVersion || 'unknown'}`)
+
+    if (visiblePathReady) {
+      log('Optional visible convenience path:')
+      log(`  ${VISIBLE_EXTENSION_PATH}`)
+    } else {
+      log('Optional visible convenience path is not prepared:')
+      log(`  ${VISIBLE_EXTENSION_PATH}`)
+      log('If you want that shortcut, run `npm run extension:install` from the installed skill directory.')
+    }
+
+    log(`Extension version: ${primaryVersion || 'unknown'}`)
     log(`Relay package version: ${relayVersion || 'unknown'}`)
-    log(`Source manifest version: ${sourceVersion || 'unknown'}`)
-    if (mismatch) {
+    if (visibleVersion) {
+      log(`Visible convenience version: ${visibleVersion}`)
+    }
+    if (versionMismatch) {
       log('Version mismatch detected. Download newest extension bundle from:')
       log(`  ${PROJECT_URL}`)
-      log(`Or update from releases:`)
+      log('Or update from releases:')
       log(`  ${PROJECT_RELEASES_URL}`)
     }
   }
 
-  writeInstallState({
-    lastHintAt: now,
-    firstRunSeen: true,
-    lastCheckedAt: now,
-    installedVersion,
-    relayVersion,
-    sourceVersion,
-    mismatch: mismatch,
-  })
+  if (printHint) {
+    writeInstallState({
+      lastHintAt: now,
+      firstRunSeen: true,
+      lastCheckedAt: now,
+      primaryPath: primaryTarget.path,
+      primaryPathKind: primaryTarget.kind,
+      installedVersion: primaryVersion,
+      visibleVersion,
+      relayVersion,
+      sourceVersion,
+      mismatch: versionMismatch,
+      visiblePathReady,
+      visiblePathNeedsRefresh,
+    })
+  }
 
   return {
-    ok: true,
-    path: VISIBLE_EXTENSION_PATH,
-    installedVersion,
+    ok: prepareVisible ? !copyFailed : true,
+    path: primaryTarget.path,
+    pathKind: primaryTarget.kind,
+    sourcePath: SOURCE_EXTENSION_PATH,
+    visiblePath: VISIBLE_EXTENSION_PATH,
+    installedVersion: primaryVersion,
+    visibleVersion,
     sourceVersion,
     relayVersion,
     updated,
     firstRun,
-    versionMismatch: mismatch,
+    versionMismatch,
     sourceMissing: false,
     copyFailed,
+    visiblePathReady,
+    visiblePathNeedsRefresh,
   }
 }
 
 function describeInstallBundleFailure(result) {
-  const targetPath = result?.path || VISIBLE_EXTENSION_PATH
+  const targetPath = result?.visiblePath || VISIBLE_EXTENSION_PATH
+  const primaryPath = result?.path || SOURCE_EXTENSION_PATH
   if (result?.sourceMissing) {
-    return `[agent-browser-relay] Failed to prepare visible extension folder at ${targetPath}: extension source is missing from ${SOURCE_EXTENSION_PATH}.`
+    return `[agent-browser-relay] Failed to resolve the Chrome extension files from ${SOURCE_EXTENSION_PATH}.`
   }
   if (result?.copyFailed) {
     return [
-      `[agent-browser-relay] Failed to prepare visible extension folder at ${targetPath}: copy failed.`,
-      `Check that ${VISIBLE_ROOT} is writable and retry.`,
+      `[agent-browser-relay] Failed to prepare the optional visible extension folder at ${targetPath}: copy failed.`,
+      `Load the primary extension path instead: ${primaryPath}.`,
+      `Check that ${VISIBLE_ROOT} is writable and retry \`npm run extension:install\`.`,
     ].join(' ')
   }
-  return `[agent-browser-relay] Failed to prepare visible extension folder at ${targetPath}.`
+  return [
+    `[agent-browser-relay] Failed to prepare the optional visible extension folder at ${targetPath}.`,
+    `Load the primary extension path instead: ${primaryPath}.`,
+  ].join(' ')
+}
+
+function parseCliArgs(args) {
+  const options = {
+    json: false,
+    paths: false,
+  }
+
+  for (const arg of args) {
+    if (arg === '--json') {
+      options.json = true
+      continue
+    }
+    if (arg === '--paths') {
+      options.paths = true
+      continue
+    }
+    if (arg === '-h' || arg === '--help') {
+      options.help = true
+      continue
+    }
+    throw new Error(`Unknown argument: ${arg}`)
+  }
+
+  return options
+}
+
+function printPathSummary(result) {
+  console.log('Primary Chrome extension path:')
+  console.log(`  ${result.path}`)
+  console.log(`Primary path source: ${describePrimaryLoadPathKind(result.pathKind)}`)
+
+  if (result.visiblePathReady) {
+    console.log('Optional visible convenience path:')
+    console.log(`  ${result.visiblePath}`)
+  } else {
+    console.log('Optional visible convenience path is not prepared:')
+    console.log(`  ${result.visiblePath}`)
+    console.log('Run `npm run extension:install` from the installed skill directory if you want that shortcut.')
+  }
 }
 
 function runCli() {
-  const result = refreshInstallBundle((message) => {
-    console.error(`[agent-browser-relay] ${message}`)
-  })
-
-  if (result.ok) {
+  let args
+  try {
+    args = parseCliArgs(process.argv.slice(2))
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error))
+    process.exitCode = 1
     return
   }
 
-  console.error(describeInstallBundleFailure(result))
-  process.exitCode = 1
+  if (args.help) {
+    console.log('Usage:')
+    console.log('  node scripts/extension-install-helper.js           # prepare optional visible convenience path')
+    console.log('  node scripts/extension-install-helper.js --paths   # print primary extension path to load in Chrome')
+    console.log('  node scripts/extension-install-helper.js --json    # output install status as JSON')
+    return
+  }
+
+  const result = refreshInstallBundle(
+    args.paths || args.json
+      ? () => {}
+      : (message) => {
+          console.error(`[agent-browser-relay] ${message}`)
+        },
+    {
+      prepareVisible: !(args.paths || args.json),
+      printHint: !(args.paths || args.json),
+    },
+  )
+
+  if (args.json) {
+    console.log(`${JSON.stringify(result, null, 2)}\n`)
+  } else if (args.paths) {
+    printPathSummary(result)
+  }
+
+  if (result.sourceMissing) {
+    console.error(describeInstallBundleFailure(result))
+    process.exitCode = 1
+    return
+  }
+
+  if (!args.paths && result.ok !== true) {
+    console.error(describeInstallBundleFailure(result))
+    process.exitCode = 1
+  }
 }
 
 if (require.main === module) {

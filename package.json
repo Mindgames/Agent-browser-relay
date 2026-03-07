@@ -8,6 +8,7 @@
   "scripts": {
     "sync:extension-version": "node scripts/sync-extension-version.js",
     "extension:install": "node scripts/extension-install-helper.js",
+    "extension:path": "node scripts/extension-install-helper.js --paths",
     "lint": "node --check relay-server.js extension/background.js extension/options.js scripts/read-active-tab.js scripts/relay-manager.js scripts/relay-service.js",
     "knip": "node -e \"console.log('knip: not configured for this repository; skipped')\"",
     "build": "node --check relay-server.js extension/background.js extension/options.js scripts/read-active-tab.js scripts/relay-manager.js scripts/relay-service.js",
@@ -32,7 +33,6 @@
     "relay:global:status": "node scripts/relay-service.js status",
     "codex:install": "bash scripts/codex-skill-link.sh",
     "codex:install:check": "bash scripts/codex-skill-link.sh --check",
-    "postinstall": "node scripts/extension-install-helper.js",
     "preversion": "node scripts/sync-extension-version.js",
     "version": "node scripts/sync-extension-version.js && git add extension/manifest.json",
     "postversion": "git push && git push --tags",

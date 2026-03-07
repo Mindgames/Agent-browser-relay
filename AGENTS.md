@@ -33,23 +33,23 @@ Default host/port is `127.0.0.1:18793` (set in code). Override per command with 
      ```bash
      npx -y skills add https://github.com/mindgames/agent-browser-relay --skill agent-browser-relay --global --yes
      ```
-     Optional Codex-only global install:
+   - Optional Codex-only global install:
      ```bash
      npx -y skills add https://github.com/mindgames/agent-browser-relay --skill agent-browser-relay --global --agent codex --yes
      ```
    - If you installed via `npx skills add`, your skill path is typically:
      `~/.agents/skills/agent-browser-relay`
-   - Install now also creates a visible Chrome extension folder at:
-     `~/agent-browser-relay/extension`
+   - The guaranteed Chrome load path after `skills add` is:
+     `~/.agents/skills/agent-browser-relay/extension`
    - Chrome → `chrome://extensions`
    - Enable Developer mode
-   - Load unpacked and select one of:
-     - `~/agent-browser-relay/extension` (preferred visible path created during install)
+   - Load unpacked and select the path that matches how this copy was installed:
      - `~/.agents/skills/agent-browser-relay/extension` (global `skills add` install)
      - `~/.agents/skills/private/agent-browser-relay/extension` (`npm run codex:install` compat path)
+   - `npm run extension:path` prints the exact current primary load path again
    - Pin Agent Browser Relay icon to the toolbar
    - Run `npm install` once if this checkout has never installed dependencies.
-   - If `~/agent-browser-relay/extension` is missing after install, run:
+   - `~/agent-browser-relay/extension` is only an optional visible convenience copy. If you want it, run:
      `npm run extension:install`
 2. Start relay server in global mode (preferred, always-on):
 
@@ -135,6 +135,7 @@ This refreshes sparse state and restores all missing tracked directories in the 
 
 ## Agent execution contract (mandatory)
 - Use these exact scripts and command names. Do not search for alternatives and do not say they "may be named differently":
+  - `npm run extension:path`
   - `npm run relay:global:install`
   - `npm run relay:global:status`
   - `npm run relay:global:start`
@@ -146,6 +147,7 @@ This refreshes sparse state and restores all missing tracked directories in the 
 - Gateway-only rule: agent must communicate with Chrome only via this relay gateway (`/status` + `node scripts/read-active-tab.js`).
 - Agent must not use direct browser automation/control tools (for example Playwright, Puppeteer, Selenium, `agent-browser`, or ad-hoc Chrome control scripts) for this workflow.
 - Agent must never take control of a random Chrome browser/profile/window; it may operate only on the explicitly attached and leased target tab.
+- On a fresh machine, agent must tell the human to load the primary extension path from `npm run extension:path` before attach/read steps. After `skills add`, that is normally `~/.agents/skills/agent-browser-relay/extension`.
 - After relay startup (`relay:global:start` / `relay:global:install` or `relay:start`), agent must stop and ask the human to attach the target tab, then wait for confirmation.
 - Agent must run `node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --tab-id "<TAB_ID>" --check --wait-for-attach --attach-timeout-ms 120000` before any data read and continue only on success.
 - For workflows that create tabs with `Target.createTarget`, agent must additionally require target-create readiness via `--require-target-create`.
