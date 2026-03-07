@@ -32,7 +32,7 @@ For unattended global install (recommended in automations/scripts):
 npx skills add Mindgames/Agent-browser-relay -g -y
 ```
 
-On a fresh machine, install now creates a visible Chrome extension folder at `~/agent-browser-relay/extension` during `npm install` / `skills add`. Runtime commands such as `npm run relay:start` and `npm run relay:global:install` still refresh that folder and print the path as a backup.
+`skills add` guarantees the installed skill at `~/.agents/skills/agent-browser-relay`. It does not guarantee the optional visible convenience copy at `~/agent-browser-relay/extension`.
 
 ### 2) Load the extension in Chrome (Developer mode)
 After install with the `skills` installer, the skill is available at:
@@ -42,10 +42,11 @@ After install with the `skills` installer, the skill is available at:
 2. Enable **Developer mode**
 3. Click **Load unpacked**
 4. Select this folder:
-   `~/agent-browser-relay/extension`
+   `~/.agents/skills/agent-browser-relay/extension`
 
-`relay:start`, `relay:global:install`, and `read-active-tab.js` keep this folder synced and print the install path + version sync status as stderr hints, so humans do not need to find hidden folders.
-If the folder is missing after install, run `npm run extension:install` from the installed skill directory and then load it in Chrome.
+Run `npm run extension:path` from the installed skill directory any time you want the exact current load path printed again.
+`relay:start`, `relay:global:install`, and `read-active-tab.js` also print the primary load path + version sync status as stderr hints.
+If you specifically want the visible convenience copy at `~/agent-browser-relay/extension`, run `npm run extension:install` from the installed skill directory.
 5. Pin the **Agent Browser Relay** toolbar icon
 
 ### 3) Attach tabs and allow broader tab control
@@ -66,7 +67,7 @@ Example prompt to your agent:
 Expected flow:
 
 1. Agent starts relay (for example `npm run relay:global:install -- --ports 18793 --timeout 12000`).
-2. On a new machine, agent tells you to load `~/agent-browser-relay/extension` in `chrome://extensions` first.
+2. On a new machine, agent tells you to load `~/.agents/skills/agent-browser-relay/extension` in `chrome://extensions` first, or asks you to run `npm run extension:path`.
 3. Agent asks you to open/focus the target tab and click **Attach this tab** in the popup.
 4. You attach the tab and confirm.
 5. Agent runs the attach check and continues reads using the tab ID you shared.
@@ -82,7 +83,7 @@ This repo integrates with two different skill roots:
 - `~/.claude/skills/agent-browser-relay`
   - Usually symlinked automatically by the `skills` installer when Claude Code is present.
 - `~/agent-browser-relay/extension`
-  - Visible Chrome extension directory printed by the skill and safe for manual navigation in Chrome.
+  - Optional visible convenience copy created by `npm run extension:install` when writable.
 
 Why this matters: installer-based setup gives a stable path and keeps Codex/Claude integrations consistent.
 
@@ -93,7 +94,7 @@ Why this matters: installer-based setup gives a stable path and keeps Codex/Clau
 - `scripts/relay-service.js`: global `launchd/systemd --user` service lifecycle.
 - `scripts/read-active-tab.js`: read/check CLI that prints JSON.
 - Relay tab leasing (`--tab-id`): isolates concurrent agents to specific tabs.
-- `scripts/extension-install-helper.js`: keeps a visible extension install folder in sync.
+- `scripts/extension-install-helper.js`: prints the primary extension path and optionally refreshes the visible convenience copy.
 
 ## Capability library exposed to callers
 
@@ -238,9 +239,13 @@ npm run relay:status -- --status-timeout-ms 3000
   - Read the startup error and relay log printed by `npm run relay:start`.
   - Do not assume sandbox/network restrictions unless the output shows an actual permission error.
 
-- Visible extension folder missing after install:
+- Unsure which extension folder to load:
+  - Run `npm run extension:path` from the installed skill directory.
+  - Load the primary path it prints in `chrome://extensions`.
+
+- Visible convenience folder missing after install:
   - Run `npm run extension:install` from the installed skill directory.
-  - Confirm `~/agent-browser-relay/extension` now exists, then load that folder in `chrome://extensions`.
+  - Confirm `~/agent-browser-relay/extension` now exists if you want that shortcut.
 
 - Attachment lost after navigation/reload:
   - Re-open popup on that tab.
@@ -268,6 +273,7 @@ Use only these script names:
 - `npm run relay:start`
 - `npm run relay:status`
 - `npm run relay:stop`
+- `npm run extension:path`
 - `node scripts/read-active-tab.js`
 
 Do not restart relay just because local files changed. Restart only when explicitly requested by a human, or for hard recovery failures.

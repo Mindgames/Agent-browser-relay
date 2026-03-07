@@ -72,13 +72,19 @@ const options = parseArgs(args)
 let installBundle = {
   ok: false,
   path: null,
+  pathKind: null,
+  sourcePath: null,
+  visiblePath: null,
   installedVersion: null,
+  visibleVersion: null,
   sourceVersion: null,
   relayVersion: null,
   versionMismatch: false,
   updated: false,
   sourceMissing: false,
   copyFailed: false,
+  visiblePathReady: false,
+  visiblePathNeedsRefresh: false,
 }
 
 if (options.help) {
@@ -194,7 +200,12 @@ function getRelaySource() {
     capabilities: SKILL_CAPABILITIES,
     extension: {
       installPath: installBundle.path,
+      loadPath: installBundle.path,
+      loadPathKind: installBundle.pathKind,
+      sourcePath: installBundle.sourcePath,
+      visiblePath: installBundle.visiblePath,
       installedVersion: installBundle.installedVersion,
+      visibleVersion: installBundle.visibleVersion,
       sourceVersion: installBundle.sourceVersion,
       relayVersion: installBundle.relayVersion,
       observedExtensionVersion,
@@ -207,6 +218,8 @@ function getRelaySource() {
       updated: Boolean(installBundle.updated),
       versionMismatch: Boolean(installBundle.versionMismatch || extensionMismatch),
       copyFailed: Boolean(installBundle.copyFailed),
+      visiblePathReady: Boolean(installBundle.visiblePathReady),
+      visiblePathNeedsRefresh: Boolean(installBundle.visiblePathNeedsRefresh),
     },
   }
 }
@@ -1759,13 +1772,19 @@ async function main() {
     installBundle = {
       ok: false,
       path: null,
+      pathKind: null,
+      sourcePath: null,
+      visiblePath: null,
       installedVersion: null,
+      visibleVersion: null,
       sourceVersion: null,
       relayVersion: null,
       versionMismatch: false,
       updated: false,
       sourceMissing: false,
       copyFailed: true,
+      visiblePathReady: false,
+      visiblePathNeedsRefresh: false,
     }
   }
 
@@ -1790,8 +1809,13 @@ async function main() {
     })
     .catch((error) => {
       if (installBundle.copyFailed) {
-        console.error('[agent-browser-relay] Failed to sync the visible extension folder for Chrome install.')
-        console.error(`[agent-browser-relay] Verify write permissions for ${path.join(os.homedir(), 'agent-browser-relay')}.`)
+        console.error('[agent-browser-relay] Failed to refresh the optional visible extension folder for Chrome install.')
+        if (installBundle.path) {
+          console.error(`[agent-browser-relay] Load the primary extension path instead: ${installBundle.path}`)
+        }
+        console.error(
+          `[agent-browser-relay] Verify write permissions for ${path.join(os.homedir(), 'agent-browser-relay')} and rerun \`npm run extension:install\` if you want the visible shortcut.`,
+        )
       }
       if (error && !error.message.includes('ECONNREFUSED')) {
         console.error(`[agent-browser-relay] Relay status check failed: ${error.message}`)

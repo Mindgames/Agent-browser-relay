@@ -105,7 +105,7 @@ if [[ -d "$CANONICAL_SKILL_PATH" && ! -L "$CANONICAL_SKILL_PATH" ]]; then
   existing_root="$(cd "$CANONICAL_SKILL_PATH" && pwd -P)"
   if [[ "$existing_root" == "$REPO_ROOT" ]]; then
     echo "[codex-skill] Reusing existing repository path at $CANONICAL_SKILL_PATH"
-    echo "[codex-skill] Chrome load target:"
+    echo "[codex-skill] Primary Chrome load path:"
     echo "[codex-skill]   $CANONICAL_EXTENSION_PATH"
     NEED_CANONICAL_LINK=0
   else
@@ -150,16 +150,18 @@ echo "[codex-skill] Linked skill workspace:"
 echo "[codex-skill]   $CANONICAL_SKILL_PATH -> $REPO_ROOT"
 echo "[codex-skill] Linked compatibility alias:"
 echo "[codex-skill]   $LEGACY_ALIAS_PATH -> $CANONICAL_SKILL_PATH"
-echo "[codex-skill] Chrome load target:"
+echo "[codex-skill] Primary Chrome load path:"
 echo "[codex-skill]   $CANONICAL_EXTENSION_PATH"
 if [[ "$EXTENSION_INSTALL_STATUS" -eq 0 ]]; then
-  echo "[codex-skill] Visible Chrome extension folder:"
+  echo "[codex-skill] Optional visible convenience path:"
   echo "[codex-skill]   $VISIBLE_EXTENSION_PATH"
-  echo "[codex-skill] Load this folder in chrome://extensions -> Load unpacked"
+  echo "[codex-skill] Chrome can load either path, but the primary path above is the guaranteed install location."
 else
-  echo "[codex-skill] WARNING: visible Chrome extension folder was not prepared."
-  echo "[codex-skill] Load the canonical extension path for now:"
+  echo "[codex-skill] WARNING: optional visible convenience path was not prepared."
+  echo "[codex-skill] Load the primary extension path:"
   echo "[codex-skill]   $CANONICAL_EXTENSION_PATH"
-  echo "[codex-skill] Then repair the visible folder with:"
+  echo "[codex-skill] If you want the visible shortcut later, run:"
   echo "[codex-skill]   npm run extension:install"
 fi
+echo "[codex-skill] To print the exact current load path again:"
+echo "[codex-skill]   npm run extension:path"
