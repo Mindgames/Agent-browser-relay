@@ -10,8 +10,9 @@ Use this skill to attach to a chosen Chrome tab through the bundled Agent Browse
 ## Quick start
 
 Fresh-machine rule:
-- `npm run relay:start` and `npm run relay:global:install` now sync the visible Chrome extension bundle to `~/agent-browser-relay/extension` and print the exact folder to load.
-- On a new machine, the human must load that folder in `chrome://extensions` before attach/read steps. Do not treat a missing extension install as a sandbox or socket-permission issue.
+- install now creates the visible Chrome extension bundle at `~/agent-browser-relay/extension` during `npm install` / `skills add`
+- `npm run relay:start` and `npm run relay:global:install` still refresh that folder and print the exact folder to load
+- on a new machine, the human must load that folder in `chrome://extensions` before attach/read steps. Do not treat a missing extension install as a sandbox or socket-permission issue.
 
 Defaults are set in code:
 - Host: `127.0.0.1`
@@ -21,7 +22,7 @@ Override per command with `--host`, `--port`, and `--attach-timeout-ms` when nee
 
 1. Install dependencies and start relay
 
-   This also prepares the visible Chrome extension folder on first run and prints the path to load in Chrome.
+   This refreshes the visible Chrome extension folder and prints the path to load in Chrome. The folder should already be created during install.
 
    ```bash
    npm run relay:start -- --status-timeout-ms 3000
@@ -44,8 +45,9 @@ Override per command with `--host`, `--port`, and `--attach-timeout-ms` when nee
 
    - `chrome://extensions`
    - Enable developer mode
-   - Load unpacked from `~/agent-browser-relay/extension` (this is the visible folder created or refreshed by `relay:start` / `relay:global:install`)
+   - Load unpacked from `~/agent-browser-relay/extension` (this is the visible folder created during install and refreshed by `relay:start` / `relay:global:install`)
    - If the command printed the extension path, treat that printed path as the source of truth
+   - If the folder is missing, run `npm run extension:install` from the installed skill directory
 
 3. Attach the extension to the target tab (open toolbar popup and click attach)
 
@@ -90,7 +92,7 @@ Override per command with `--host`, `--port`, and `--attach-timeout-ms` when nee
 - Gateway-only rule: always communicate through the local relay gateway (`/status` and `node scripts/read-active-tab.js`).
 - Never use direct browser-control tooling for this workflow (for example Playwright, Puppeteer, Selenium, `agent-browser`, or ad-hoc Chrome control scripts).
 - Never take control of a random Chrome window/profile. Only operate on the explicitly attached target tab leased via `--tab-id`.
-- On a fresh machine, after `relay:start` or `relay:global:install`, explicitly tell the human to load `~/agent-browser-relay/extension` in `chrome://extensions` before any attach/read attempt.
+- On a fresh machine, explicitly tell the human to load `~/agent-browser-relay/extension` in `chrome://extensions` before any attach/read attempt.
 - Canonical commands:
   - `npm run relay:start`
   - `npm run relay:status`

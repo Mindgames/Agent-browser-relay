@@ -127,7 +127,7 @@ function refreshInstallBundle(log = () => {}) {
 
   if (shouldPrintHint) {
     if (firstRun) {
-      log('[agent-browser-relay] First run setup for this machine:')
+      log('First run setup for this machine:')
       log('1) Open Chrome and visit chrome://extensions')
       log('2) Enable Developer mode (top-right)')
       log('3) Click "Load unpacked"')
