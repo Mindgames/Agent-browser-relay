@@ -176,6 +176,38 @@ function refreshInstallBundle(log = () => {}) {
   }
 }
 
+function describeInstallBundleFailure(result) {
+  const targetPath = result?.path || VISIBLE_EXTENSION_PATH
+  if (result?.sourceMissing) {
+    return `[agent-browser-relay] Failed to prepare visible extension folder at ${targetPath}: extension source is missing from ${SOURCE_EXTENSION_PATH}.`
+  }
+  if (result?.copyFailed) {
+    return [
+      `[agent-browser-relay] Failed to prepare visible extension folder at ${targetPath}: copy failed.`,
+      `Check that ${VISIBLE_ROOT} is writable and retry.`,
+    ].join(' ')
+  }
+  return `[agent-browser-relay] Failed to prepare visible extension folder at ${targetPath}.`
+}
+
+function runCli() {
+  const result = refreshInstallBundle((message) => {
+    console.error(`[agent-browser-relay] ${message}`)
+  })
+
+  if (result.ok) {
+    return
+  }
+
+  console.error(describeInstallBundleFailure(result))
+  process.exitCode = 1
+}
+
+if (require.main === module) {
+  runCli()
+}
+
 module.exports = {
+  describeInstallBundleFailure,
   refreshInstallBundle,
 }

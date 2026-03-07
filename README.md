@@ -32,6 +32,8 @@ For unattended global install (recommended in automations/scripts):
 npx skills add Mindgames/Agent-browser-relay -g -y
 ```
 
+On a fresh machine, the first `npm run relay:start` or `npm run relay:global:install` also syncs a visible Chrome extension folder to `~/agent-browser-relay/extension` and prints that path. Load that folder in Chrome before debugging attach/read failures.
+
 ### 2) Load the extension in Chrome (Developer mode)
 After install with the `skills` installer, the skill is available at:
 `~/.agents/skills/agent-browser-relay`
@@ -42,8 +44,7 @@ After install with the `skills` installer, the skill is available at:
 4. Select this folder:
    `~/agent-browser-relay/extension`
 
-`read-active-tab.js` keeps this folder synced on first run and prints the install path + version
-sync status as stderr hints, so humans do not need to find hidden folders.
+`relay:start`, `relay:global:install`, and `read-active-tab.js` keep this folder synced and print the install path + version sync status as stderr hints, so humans do not need to find hidden folders.
 5. Pin the **Agent Browser Relay** toolbar icon
 
 ### 3) Attach tabs and allow broader tab control
@@ -64,9 +65,10 @@ Example prompt to your agent:
 Expected flow:
 
 1. Agent starts relay (for example `npm run relay:global:install -- --ports 18793 --timeout 12000`).
-2. Agent asks you to open/focus the target tab and click **Attach this tab** in the popup.
-3. You attach the tab and confirm.
-4. Agent runs the attach check and continues reads using the tab ID you shared.
+2. On a new machine, agent tells you to load `~/agent-browser-relay/extension` in `chrome://extensions` first.
+3. Agent asks you to open/focus the target tab and click **Attach this tab** in the popup.
+4. You attach the tab and confirm.
+5. Agent runs the attach check and continues reads using the tab ID you shared.
 
 ## Skill Directory Structure (`.agents` + `.claude`)
 
@@ -230,6 +232,10 @@ npm run relay:status -- --all --status-timeout-ms 3000
 ```bash
 npm run relay:status -- --status-timeout-ms 3000
 ```
+
+- Relay start timed out:
+  - Read the startup error and relay log printed by `npm run relay:start`.
+  - Do not assume sandbox/network restrictions unless the output shows an actual permission error.
 
 - Attachment lost after navigation/reload:
   - Re-open popup on that tab.

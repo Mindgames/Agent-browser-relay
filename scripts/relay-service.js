@@ -5,6 +5,7 @@ const os = require('node:os')
 const path = require('node:path')
 const http = require('node:http')
 const { spawnSync } = require('node:child_process')
+const { describeInstallBundleFailure, refreshInstallBundle } = require('./extension-install-helper')
 
 const SERVICE_NAME = 'grais-debugger-relay'
 const SERVICE_LABEL = 'com.grais.debugger.relay'
@@ -54,6 +55,10 @@ const DOMAIN_TARGET = `gui/${process.getuid()}`
 })()
 
 async function run(commandName) {
+  if (['install', 'start', 'restart', 'update'].includes(commandName)) {
+    prepareVisibleExtensionBundle()
+  }
+
   if (commandName === 'install') {
     installService()
     if (waitForReady && readyTimeoutMs > 0) {
@@ -96,6 +101,23 @@ async function run(commandName) {
   }
 
   throw new Error(`Unknown command "${commandName}"`)
+}
+
+function prepareVisibleExtensionBundle() {
+  let result
+  try {
+    result = refreshInstallBundle((message) => {
+      console.error(`[agent-browser-relay] ${message}`)
+    })
+  } catch (error) {
+    throw new Error(
+      `[agent-browser-relay] Failed to prepare visible extension folder: ${error instanceof Error ? error.message : String(error)}`,
+    )
+  }
+  if (!result || result.ok !== true) {
+    throw new Error(describeInstallBundleFailure(result))
+  }
+  return result
 }
 
 function installService({ startOnly = true } = {}) {

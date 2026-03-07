@@ -61,10 +61,10 @@ initializePorts(relayPorts).catch((error) => {
 function initializePorts(ports) {
   return new Promise((resolve, reject) => {
     const sortedPorts = [...new Set(ports)].sort((a, b) => a - b)
+    const portsLabel = sortedPorts.join(', ')
     const listeners = sortedPorts.map((port) => startPortListener(port))
     Promise.all(listeners)
       .then(() => {
-        const portsLabel = sortedPorts.join(', ')
         if (sortedPorts.length > 1) {
           console.log(`Agent Browser Relay listening on ports: ${portsLabel} (shared relay hub)`)
         } else {
