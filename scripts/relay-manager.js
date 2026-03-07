@@ -131,12 +131,22 @@ function prepareVisibleExtensionBundle() {
       console.error(`[agent-browser-relay] ${message}`)
     })
   } catch (error) {
-    throw new Error(
-      `[agent-browser-relay] Failed to prepare visible extension folder: ${error instanceof Error ? error.message : String(error)}`,
+    console.warn(
+      [
+        `[agent-browser-relay] Failed to prepare visible extension folder: ${error instanceof Error ? error.message : String(error)}`,
+        'Relay startup will continue, but the visible Chrome extension folder may be stale or missing.',
+      ].join(' '),
     )
+    return null
   }
   if (!result || result.ok !== true) {
-    throw new Error(describeInstallBundleFailure(result))
+    console.warn(
+      [
+        describeInstallBundleFailure(result),
+        'Relay startup will continue, but the visible Chrome extension folder may be stale or missing.',
+      ].join(' '),
+    )
+    return result
   }
   return result
 }
