@@ -11,6 +11,8 @@ VISIBLE_EXTENSION_PATH="${VISIBLE_ROOT}/extension"
 
 MODE="install"
 FORCE=0
+EXTENSION_INSTALL_STATUS=0
+EXTENSION_INSTALL_OUTPUT=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -131,7 +133,17 @@ fi
 ln -sfn "$CANONICAL_SKILL_PATH" "$LEGACY_ALIAS_PATH"
 
 if command -v node >/dev/null 2>&1; then
-  node "$REPO_ROOT/scripts/extension-install-helper.js" >/dev/null 2>&1 || true
+  set +e
+  EXTENSION_INSTALL_OUTPUT="$(node "$REPO_ROOT/scripts/extension-install-helper.js" 2>&1)"
+  EXTENSION_INSTALL_STATUS=$?
+  set -e
+else
+  EXTENSION_INSTALL_STATUS=127
+  EXTENSION_INSTALL_OUTPUT="[codex-skill] WARNING: node is not available; skipping visible extension preparation."
+fi
+
+if [[ -n "$EXTENSION_INSTALL_OUTPUT" ]]; then
+  printf '%s\n' "$EXTENSION_INSTALL_OUTPUT"
 fi
 
 echo "[codex-skill] Linked skill workspace:"
@@ -140,6 +152,14 @@ echo "[codex-skill] Linked compatibility alias:"
 echo "[codex-skill]   $LEGACY_ALIAS_PATH -> $CANONICAL_SKILL_PATH"
 echo "[codex-skill] Chrome load target:"
 echo "[codex-skill]   $CANONICAL_EXTENSION_PATH"
-echo "[codex-skill] Visible Chrome extension folder:"
-echo "[codex-skill]   $VISIBLE_EXTENSION_PATH"
-echo "[codex-skill] Load this folder in chrome://extensions -> Load unpacked"
+if [[ "$EXTENSION_INSTALL_STATUS" -eq 0 ]]; then
+  echo "[codex-skill] Visible Chrome extension folder:"
+  echo "[codex-skill]   $VISIBLE_EXTENSION_PATH"
+  echo "[codex-skill] Load this folder in chrome://extensions -> Load unpacked"
+else
+  echo "[codex-skill] WARNING: visible Chrome extension folder was not prepared."
+  echo "[codex-skill] Load the canonical extension path for now:"
+  echo "[codex-skill]   $CANONICAL_EXTENSION_PATH"
+  echo "[codex-skill] Then repair the visible folder with:"
+  echo "[codex-skill]   npm run extension:install"
+fi
