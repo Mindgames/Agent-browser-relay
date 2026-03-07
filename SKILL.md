@@ -9,6 +9,10 @@ Use this skill to attach to a chosen Chrome tab through the bundled Agent Browse
 
 ## Quick start
 
+Fresh-machine rule:
+- `npm run relay:start` and `npm run relay:global:install` now sync the visible Chrome extension bundle to `~/agent-browser-relay/extension` and print the exact folder to load.
+- On a new machine, the human must load that folder in `chrome://extensions` before attach/read steps. Do not treat a missing extension install as a sandbox or socket-permission issue.
+
 Defaults are set in code:
 - Host: `127.0.0.1`
 - Port: `18793`
@@ -16,6 +20,8 @@ Defaults are set in code:
 Override per command with `--host`, `--port`, and `--attach-timeout-ms` when needed.
 
 1. Install dependencies and start relay
+
+   This also prepares the visible Chrome extension folder on first run and prints the path to load in Chrome.
 
    ```bash
    npm run relay:start -- --status-timeout-ms 3000
@@ -38,7 +44,8 @@ Override per command with `--host`, `--port`, and `--attach-timeout-ms` when nee
 
    - `chrome://extensions`
    - Enable developer mode
-   - Load unpacked from `~/agent-browser-relay/extension` (this is the visible folder created by the skill helper)
+   - Load unpacked from `~/agent-browser-relay/extension` (this is the visible folder created or refreshed by `relay:start` / `relay:global:install`)
+   - If the command printed the extension path, treat that printed path as the source of truth
 
 3. Attach the extension to the target tab (open toolbar popup and click attach)
 
@@ -83,6 +90,7 @@ Override per command with `--host`, `--port`, and `--attach-timeout-ms` when nee
 - Gateway-only rule: always communicate through the local relay gateway (`/status` and `node scripts/read-active-tab.js`).
 - Never use direct browser-control tooling for this workflow (for example Playwright, Puppeteer, Selenium, `agent-browser`, or ad-hoc Chrome control scripts).
 - Never take control of a random Chrome window/profile. Only operate on the explicitly attached target tab leased via `--tab-id`.
+- On a fresh machine, after `relay:start` or `relay:global:install`, explicitly tell the human to load `~/agent-browser-relay/extension` in `chrome://extensions` before any attach/read attempt.
 - Canonical commands:
   - `npm run relay:start`
   - `npm run relay:status`
@@ -99,6 +107,7 @@ Override per command with `--host`, `--port`, and `--attach-timeout-ms` when nee
 - Do not stop/restart relay during the task unless the human requests it or recovery is explicitly required.
 - Do not restart relay only because code was updated locally; updates are applied on next explicit human-approved restart.
 - If the requested `tabId` is missing from relay status `attachedTabs`, stop and ask the human to re-attach the target tab in the popup before continuing.
+- If `relay:start` times out, report the actual relay log/error. Do not guess about sandbox restrictions unless the command output shows a concrete permission error.
 - If the page shows human-verification gates (for example "Are you human?" or CAPTCHA), stop immediately, alert the human with [$attention-please](/Users/mathiasasberg/.codex/skills/public/attention-please/SKILL.md), and wait for explicit human confirmation before continuing.
 
 5. Read structured tab payload

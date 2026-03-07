@@ -6,6 +6,8 @@ CANONICAL_ROOT="${HOME}/.agents/skills/private"
 CANONICAL_SKILL_PATH="${CANONICAL_ROOT}/agent-browser-relay"
 LEGACY_ALIAS_PATH="${CANONICAL_ROOT}/browser-relay"
 CANONICAL_EXTENSION_PATH="${CANONICAL_SKILL_PATH}/extension"
+VISIBLE_ROOT="${HOME}/agent-browser-relay"
+VISIBLE_EXTENSION_PATH="${VISIBLE_ROOT}/extension"
 
 MODE="install"
 FORCE=0
@@ -128,9 +130,16 @@ fi
 
 ln -sfn "$CANONICAL_SKILL_PATH" "$LEGACY_ALIAS_PATH"
 
+if command -v node >/dev/null 2>&1; then
+  node "$REPO_ROOT/scripts/extension-install-helper.js" >/dev/null 2>&1 || true
+fi
+
 echo "[codex-skill] Linked skill workspace:"
 echo "[codex-skill]   $CANONICAL_SKILL_PATH -> $REPO_ROOT"
 echo "[codex-skill] Linked compatibility alias:"
 echo "[codex-skill]   $LEGACY_ALIAS_PATH -> $CANONICAL_SKILL_PATH"
 echo "[codex-skill] Chrome load target:"
 echo "[codex-skill]   $CANONICAL_EXTENSION_PATH"
+echo "[codex-skill] Visible Chrome extension folder:"
+echo "[codex-skill]   $VISIBLE_EXTENSION_PATH"
+echo "[codex-skill] Load this folder in chrome://extensions -> Load unpacked"

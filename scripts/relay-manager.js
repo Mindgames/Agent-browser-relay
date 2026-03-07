@@ -4,6 +4,7 @@ const os = require('node:os')
 const path = require('node:path')
 const http = require('node:http')
 const { spawn } = require('node:child_process')
+const { refreshInstallBundle } = require('./extension-install-helper')
 
 const DEFAULT_HOST = '127.0.0.1'
 const DEFAULT_PORT = 18793
@@ -71,6 +72,8 @@ async function main() {
 }
 
 async function startRelay() {
+  prepareVisibleExtensionBundle()
+
   const preCheck = await fetchRelayStatus(false)
   if (preCheck.ok) {
     const activePorts =
@@ -95,7 +98,12 @@ async function startRelay() {
     DEFAULT_START_POLL_MS,
   )
   if (!started) {
-    throw new Error(`Relay did not become reachable at http://${host}:${port}/status within ${startTimeoutMs}ms`)
+    throw new Error(
+      [
+        `Relay did not become reachable at http://${host}:${port}/status within ${startTimeoutMs}ms.`,
+        buildRelayLogHint(),
+      ].join('\n'),
+    )
   }
 
   const lockOwner = readRelayLock()
@@ -114,6 +122,18 @@ async function startRelay() {
   const ttlLabel =
     autoStopMs > 0 ? ` (auto-stop in ${Math.ceil(autoStopMs / 1000)}s)` : ' (auto-stop disabled)'
   console.log(`Relay started in background at http://${host}:${port}/status${pidLabel}${ttlLabel}`)
+}
+
+function prepareVisibleExtensionBundle() {
+  try {
+    refreshInstallBundle((message) => {
+      console.error(`[agent-browser-relay] ${message}`)
+    })
+  } catch (error) {
+    console.error(
+      `[agent-browser-relay] Failed to prepare visible extension folder: ${error instanceof Error ? error.message : String(error)}`,
+    )
+  }
 }
 
 async function updateRelayPorts() {
@@ -261,6 +281,28 @@ function cleanupManagerState() {
     fs.unlinkSync(relayStatePath)
   } catch {
     // best effort
+  }
+}
+
+function buildRelayLogHint() {
+  const logPath = getRelayLogPath(host)
+  const logTail = readRelayLogTail(logPath)
+  if (!logTail) {
+    return `Check relay log: ${logPath}`
+  }
+  return `Recent relay log (${logPath}):\n${logTail}`
+}
+
+function readRelayLogTail(logPath, maxLines = 40, maxChars = 4000) {
+  try {
+    const raw = fs.readFileSync(logPath, 'utf8').trim()
+    if (!raw) return ''
+    const lines = raw.split(/\r?\n/).slice(-maxLines)
+    const joined = lines.join('\n')
+    if (joined.length <= maxChars) return joined
+    return joined.slice(joined.length - maxChars)
+  } catch {
+    return ''
   }
 }
 

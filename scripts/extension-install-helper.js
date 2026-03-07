@@ -176,6 +176,29 @@ function refreshInstallBundle(log = () => {}) {
   }
 }
 
+function runCli() {
+  const result = refreshInstallBundle((message) => {
+    console.error(`[agent-browser-relay] ${message}`)
+  })
+
+  if (result.ok) {
+    return
+  }
+
+  if (result.sourceMissing) {
+    console.error('[agent-browser-relay] Failed to prepare visible extension folder: extension source is missing.')
+  } else if (result.copyFailed) {
+    console.error('[agent-browser-relay] Failed to prepare visible extension folder: copy failed.')
+  } else {
+    console.error('[agent-browser-relay] Failed to prepare visible extension folder.')
+  }
+  process.exitCode = 1
+}
+
+if (require.main === module) {
+  runCli()
+}
+
 module.exports = {
   refreshInstallBundle,
 }
