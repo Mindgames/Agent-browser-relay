@@ -5,7 +5,7 @@ const os = require('node:os')
 const path = require('node:path')
 const http = require('node:http')
 const { spawnSync } = require('node:child_process')
-const { refreshInstallBundle } = require('./extension-install-helper')
+const { describeInstallBundleFailure, refreshInstallBundle } = require('./extension-install-helper')
 
 const SERVICE_NAME = 'grais-debugger-relay'
 const SERVICE_LABEL = 'com.grais.debugger.relay'
@@ -104,15 +104,20 @@ async function run(commandName) {
 }
 
 function prepareVisibleExtensionBundle() {
+  let result
   try {
-    refreshInstallBundle((message) => {
+    result = refreshInstallBundle((message) => {
       console.error(`[agent-browser-relay] ${message}`)
     })
   } catch (error) {
-    console.error(
+    throw new Error(
       `[agent-browser-relay] Failed to prepare visible extension folder: ${error instanceof Error ? error.message : String(error)}`,
     )
   }
+  if (!result || result.ok !== true) {
+    throw new Error(describeInstallBundleFailure(result))
+  }
+  return result
 }
 
 function installService({ startOnly = true } = {}) {

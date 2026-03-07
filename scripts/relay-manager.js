@@ -4,7 +4,7 @@ const os = require('node:os')
 const path = require('node:path')
 const http = require('node:http')
 const { spawn } = require('node:child_process')
-const { refreshInstallBundle } = require('./extension-install-helper')
+const { describeInstallBundleFailure, refreshInstallBundle } = require('./extension-install-helper')
 
 const DEFAULT_HOST = '127.0.0.1'
 const DEFAULT_PORT = 18793
@@ -125,15 +125,20 @@ async function startRelay() {
 }
 
 function prepareVisibleExtensionBundle() {
+  let result
   try {
-    refreshInstallBundle((message) => {
+    result = refreshInstallBundle((message) => {
       console.error(`[agent-browser-relay] ${message}`)
     })
   } catch (error) {
-    console.error(
+    throw new Error(
       `[agent-browser-relay] Failed to prepare visible extension folder: ${error instanceof Error ? error.message : String(error)}`,
     )
   }
+  if (!result || result.ok !== true) {
+    throw new Error(describeInstallBundleFailure(result))
+  }
+  return result
 }
 
 async function updateRelayPorts() {
