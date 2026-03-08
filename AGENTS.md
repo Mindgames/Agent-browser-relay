@@ -22,6 +22,12 @@ This repository provides a local browser-relay so an agent can attach to a **cho
   - Default extractor: `--text-regex`, `--exclude-text-regex`, `--link-text-regex`, `--link-href-regex`.
   - WhatsApp extractor: `--message-regex`, `--exclude-message-regex`, `--sender-regex`, `--exclude-sender-regex`.
 
+## Package manager
+- Prefer `pnpm` for dependency installs and package-script execution in this repo.
+- Use `pnpm install` instead of `npm install`.
+- Use `pnpm <script>` instead of `npm run <script>` when running repo scripts.
+- If older examples still show `npm`, treat them as aliases and execute the `pnpm` form unless the user explicitly asks for `npm`.
+
 ## Setup
 ### Relay endpoint
 Default host/port is `127.0.0.1:18793` (set in code). Override per command with `--host` / `--port` if needed.

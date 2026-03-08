@@ -20,56 +20,89 @@ Agent Browser Relay lets your agent control and read from tabs in your real Chro
 
 ## Quick Start (Human Setup)
 
-### 1) Install with `skills` CLI (recommended)
+### 1) Choose your install mode
 
-```bash
-npx skills add Mindgames/Agent-browser-relay
-```
-
-For unattended global install (recommended in automations/scripts):
+#### Global install with `skills` (recommended)
 
 ```bash
 npx skills add Mindgames/Agent-browser-relay -g -y
 ```
 
-`skills add` guarantees the installed skill at `~/.agents/skills/agent-browser-relay`. It does not guarantee the optional visible convenience copy at `~/agent-browser-relay/extension`.
+Try this folder in Chrome first:
+`~/agent-browser-relay/extension`
 
-### 2) Load the extension in Chrome (Developer mode)
-After install with the `skills` installer, the skill is available at:
-`~/.agents/skills/agent-browser-relay`
+If that folder is missing, use:
+`~/.agents/skills/agent-browser-relay/extension`
+
+#### Project or local checkout
+
+If you are working from this repository directly, load this folder in Chrome:
+`<your-checkout>/extension`
+
+Examples:
+- `/Users/you/Projects/Agent-browser-relay/extension`
+- `/Users/you/code/agent-browser-relay/extension`
+
+To print the exact path for the copy you are using, run `npm run extension:path` from that copy.
+
+Notes:
+- `skills add` guarantees the installed skill at `~/.agents/skills/agent-browser-relay`
+- `~/agent-browser-relay/extension` is only a convenience path when it exists
+- if `~/agent-browser-relay/extension` is missing, run `npm run extension:install` or load the hidden skill path directly
+
+### 2) Load the extension in Chrome
 
 1. Open `chrome://extensions`
 2. Enable **Developer mode**
 3. Click **Load unpacked**
-4. Select this folder:
-   `~/.agents/skills/agent-browser-relay/extension`
+4. In the Chrome file picker, press `Command+Shift+G`
+5. Paste the exact extension folder path:
+   - `~/agent-browser-relay/extension` for a global install, if that folder exists
+   - otherwise `~/.agents/skills/agent-browser-relay/extension` for a global install
+   - `<your-checkout>/extension` for a project or local checkout
+6. Press Enter, then select the `extension` folder if Chrome does not open it automatically
+7. Pin the **Agent Browser Relay** toolbar icon
 
-Run `npm run extension:path` from the installed skill directory any time you want the exact current load path printed again.
+This `Command+Shift+G` step is the easiest option on macOS because it works even when `.agents` is hidden.
+
+If you prefer to browse manually in Finder:
+- press `Command+Shift+.` to show hidden files
+- then browse to `agent-browser-relay/extension`
+- if that folder is missing, browse to `.agents/skills/agent-browser-relay/extension`
+
 `relay:start`, `relay:global:install`, and `read-active-tab.js` also print the primary load path + version sync status as stderr hints.
-Open the toolbar popup once after starting relay. The popup now wakes the extension and should show `Relay connected on <port>` when Chrome has actually loaded it.
-You can confirm that from the terminal with `npm run extension:status -- --wait-for-connected --connected-timeout-ms 120000`.
-If you specifically want the visible convenience copy at `~/agent-browser-relay/extension`, run `npm run extension:install` from the installed skill directory.
-5. Pin the **Agent Browser Relay** toolbar icon
 
-### 3) Confirm the extension is loaded in Chrome
+### 3) Backup download option
 
-1. Open the Chrome tab you want the agent to use.
-2. Open the **Agent Browser Relay** popup from the toolbar icon.
-3. Wait for the popup status to show `Relay connected on <port>`.
-4. Or confirm from the terminal:
+If hidden folders are still getting in the way, use a ZIP fallback instead:
+
+1. Download the repo ZIP: [Mindgames/Agent-browser-relay main.zip](https://github.com/Mindgames/Agent-browser-relay/archive/refs/heads/main.zip)
+2. Unzip it anywhere convenient
+3. In Chrome, click **Load unpacked**
+4. Select the `extension` folder inside the unzipped repo
+
+This is a fallback only. The primary install path is still the one from your global install or local checkout.
+
+### 4) Confirm the extension is loaded in Chrome
+
+1. Start the relay
+2. Open the Chrome tab you want the agent to use
+3. Open the **Agent Browser Relay** popup from the toolbar icon
+4. Wait for the popup status to show `Relay connected on <port>`
+5. Or confirm from the terminal:
 
 ```bash
 npm run extension:status -- --wait-for-connected --connected-timeout-ms 120000
 ```
 
-### 4) Attach tabs and allow broader tab control
+### 5) Attach tabs and allow broader tab control
 
 1. With the popup open on the target tab, click **Attach this tab** and confirm the badge shows `ON`.
 2. If you want the agent to create its own background tabs, enable **Allow agent to create new background tabs** in the popup.
 3. In **Connections**, click **Copy ID** for the attached tab and send it to your agent, for example: `Use tab 4581930`.
 4. Repeat for every tab you want the agent to access.
 
-### 5) Showcase: User + Agent Flow
+### 6) Showcase: User + Agent Flow
 
 Example prompt to your agent:
 
@@ -78,26 +111,30 @@ Example prompt to your agent:
 Expected flow:
 
 1. Agent starts relay (for example `npm run relay:global:install -- --ports 18793 --timeout 12000`).
-2. On a new machine, agent tells you to load `~/.agents/skills/agent-browser-relay/extension` in `chrome://extensions` first, or asks you to run `npm run extension:path`.
+2. On a new machine, agent tells you which extension folder to load first:
+   - `~/agent-browser-relay/extension` for a global install, if that folder exists
+   - otherwise `~/.agents/skills/agent-browser-relay/extension` for a global install
+   - `<your-checkout>/extension` for a project or local checkout
+   - or asks you to run `npm run extension:path`
 3. Agent asks you to open the popup once so Chrome proves the extension is loaded, then checks `npm run extension:status`.
 4. If the workflow needs a specific existing tab, agent asks you to click **Attach this tab** in the popup.
 5. If the workflow only needs a new agent-created tab, the agent can create it itself once **Allow agent to create new background tabs** is enabled.
 6. Agent runs the attach or target-create readiness check and continues.
 
-## Skill Directory Structure (`.agents` + `.claude`)
+## Relay Skill Paths
 
-This repo integrates with two different skill roots:
+`agent-browser-relay` is its own skill. It does not live inside or depend on the separate `agent-browser` skill.
 
-- `~/.agents/skills/agent-browser/`
-  - Houses the `agent-browser` skill/CLI workflow used for browser automation.
+The paths that matter for this project are:
+
 - `~/.agents/skills/agent-browser-relay`
-  - Canonical global skill path for this relay project.
+  - Canonical global install path for the `agent-browser-relay` skill.
 - `~/.claude/skills/agent-browser-relay`
-  - Usually symlinked automatically by the `skills` installer when Claude Code is present.
+  - Optional Claude-side skill path, usually created by the installer when Claude Code is present.
 - `~/agent-browser-relay/extension`
   - Optional visible convenience copy created by `npm run extension:install` when writable.
 
-Why this matters: installer-based setup gives a stable path and keeps Codex/Claude integrations consistent.
+Why this matters: the relay extension should be loaded from an `agent-browser-relay` path, not from `agent-browser`.
 
 ## Components
 
