@@ -66,6 +66,7 @@ Override per command with `--host`, `--port`, and `--attach-timeout-ms` when nee
 4. Attach the extension to the target tab (open toolbar popup and click attach)
 
    Optional per-tab relay: in the popup, set **Tab port** before clicking attach if this tab should use a non-default relay port.
+   If you want the agent to create its own first background tab instead, enable **Allow agent to create new background tabs** in the popup.
 
    Agent requirement: after `extension:status` confirms Chrome loaded the extension, pause and ask the human to do this attach step, then wait for confirmation before continuing.
 
@@ -119,10 +120,11 @@ Override per command with `--host`, `--port`, and `--attach-timeout-ms` when nee
   - `curl --max-time 3 -sS "http://127.0.0.1:18793/status"`
   - `npm run relay:status -- --all --status-timeout-ms 3000`
 - After `relay:start`, pause and ask the human to open the popup once so `npm run extension:status -- --wait-for-connected --connected-timeout-ms 120000` can confirm Chrome actually loaded the extension.
-- Only after `extension:status` succeeds, ask the human to attach the target tab before any read.
+- Only after `extension:status` succeeds, either ask the human to attach the target tab before reads, or confirm that **Allow agent to create new background tabs** is enabled before first-tab creation workflows.
 - Run `node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --tab-id "<TAB_ID>" --check --wait-for-attach --attach-timeout-ms "120000"` before reads and proceed only when it succeeds.
-- If the workflow will open tabs via `Target.createTarget`, run the same check with `--require-target-create` and proceed only when it succeeds.
+- If the workflow will open tabs via `Target.createTarget`, run `node scripts/read-active-tab.js --check --require-target-create` and proceed only when it succeeds.
 - For all agent runs (single-agent and concurrent), always pass `--tab-id <tabId>` on check/read commands so every operation is lease-scoped.
+- When `Target.createTarget` is enabled, the extension may create and auto-attach the first agent-controlled tab for the session without a human seed attach step.
 - Do not stop/restart relay during the task unless the human requests it or recovery is explicitly required.
 - Do not restart relay only because code was updated locally; updates are applied on next explicit human-approved restart.
 - If the requested `tabId` is missing from relay status `attachedTabs`, stop and ask the human to re-attach the target tab in the popup before continuing.

@@ -65,7 +65,7 @@ npm run extension:status -- --wait-for-connected --connected-timeout-ms 120000
 ### 4) Attach tabs and allow broader tab control
 
 1. With the popup open on the target tab, click **Attach this tab** and confirm the badge shows `ON`.
-2. If you want the agent to open additional background tabs, enable **Allow agent to open new background tabs** in the popup.
+2. If you want the agent to create its own background tabs, enable **Allow agent to create new background tabs** in the popup.
 3. In **Connections**, click **Copy ID** for the attached tab and send it to your agent, for example: `Use tab 4581930`.
 4. Repeat for every tab you want the agent to access.
 
@@ -80,9 +80,9 @@ Expected flow:
 1. Agent starts relay (for example `npm run relay:global:install -- --ports 18793 --timeout 12000`).
 2. On a new machine, agent tells you to load `~/.agents/skills/agent-browser-relay/extension` in `chrome://extensions` first, or asks you to run `npm run extension:path`.
 3. Agent asks you to open the popup once so Chrome proves the extension is loaded, then checks `npm run extension:status`.
-4. Agent asks you to click **Attach this tab** in the popup.
-5. You attach the tab and confirm.
-6. Agent runs the attach check and continues reads using the tab ID you shared.
+4. If the workflow needs a specific existing tab, agent asks you to click **Attach this tab** in the popup.
+5. If the workflow only needs a new agent-created tab, the agent can create it itself once **Allow agent to create new background tabs** is enabled.
+6. Agent runs the attach or target-create readiness check and continues.
 
 ## Skill Directory Structure (`.agents` + `.claude`)
 
@@ -159,12 +159,12 @@ npm run relay:start -- --host 127.0.0.1 --port 18793 --status-timeout-ms 3000
 
 ## Required Attach Gate (Before Any Read)
 
-After relay startup, a human must attach the target tab:
+After relay startup, a human must confirm the extension is loaded before any read or tab-create workflow:
 1. Open/focus target tab in Chrome.
 2. Open Agent Browser Relay popup once and confirm the popup shows `Relay connected on <port>`.
 3. Or confirm from the terminal with `npm run extension:status -- --wait-for-connected --connected-timeout-ms 120000`.
-4. Click **Attach this tab**.
-5. Confirm badge shows `ON`.
+4. If you want the agent to work on an existing tab, click **Attach this tab**.
+5. If you want the agent to create its own first tab, enable **Allow agent to create new background tabs** in the popup.
 
 Then run:
 
@@ -181,7 +181,7 @@ node scripts/read-active-tab.js --tab-id "<TAB_ID>" --check --wait-for-attach --
 If your workflow will open background tabs via `Target.createTarget`, require that readiness explicitly:
 
 ```bash
-node scripts/read-active-tab.js --tab-id "<TAB_ID>" --check --wait-for-attach --require-target-create --attach-timeout-ms 120000
+node scripts/read-active-tab.js --check --require-target-create
 ```
 
 ## Health Check (Timeout Required)
@@ -261,6 +261,11 @@ npm run relay:status -- --status-timeout-ms 3000
   - Open the Agent Browser Relay popup once.
   - Run `npm run extension:status -- --wait-for-connected --connected-timeout-ms 120000`.
   - Continue only when it reports `Chrome extension connected`.
+
+- Agent says it cannot create a new tab yet:
+  - Enable **Allow agent to create new background tabs** in the popup.
+  - Re-run `node scripts/read-active-tab.js --check --require-target-create`.
+  - If you want the agent to use an existing tab instead, attach that tab and pass its `tabId`.
 
 - Visible convenience folder missing after install:
   - Run `npm run extension:install` from the installed skill directory.

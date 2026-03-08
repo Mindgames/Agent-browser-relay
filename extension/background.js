@@ -833,7 +833,22 @@ async function attachTab(tabId, opts = {}) {
 
   setBadge(tabId, 'on')
   dbg('attachTab.success', { tabId, sessionId, targetId })
-  return { sessionId, targetId }
+  return { tabId, sessionId, targetId }
+}
+
+async function createManagedTargetTab(url = 'about:blank') {
+  const targetUrl = typeof url === 'string' && url.trim() ? url : 'about:blank'
+  dbg('createManagedTargetTab.start', { requestedUrl: targetUrl })
+  const tab = await chrome.tabs.create({ url: targetUrl, active: false })
+  if (!tab.id) throw new Error('Failed to create tab')
+  await new Promise((r) => setTimeout(r, 100))
+  const attached = await attachTab(tab.id)
+  return {
+    tabId: tab.id,
+    sessionId: attached.sessionId,
+    targetId: attached.targetId,
+    url: targetUrl,
+  }
 }
 
 async function ensureActiveTabAttachedFromRelay({ force = false, tabId } = {}) {
@@ -999,6 +1014,13 @@ async function handleForwardCdpCommand(msg) {
   const sessionId = typeof msg?.params?.sessionId === 'string' ? msg.params.sessionId : undefined
   const requestedTabId = normalizeTabId(msg?.params?.tabId)
 
+  if (method === 'Target.createTarget') {
+    if (!allowTargetCreate) {
+      throw new Error('Target.createTarget is disabled. Enable "Allow agent to create new background tabs" in the popup.')
+    }
+    return await createManagedTargetTab(typeof params?.url === 'string' ? params.url : 'about:blank')
+  }
+
   if (method === 'Grais.debugger.ensureActiveTab') {
     dbg('handleForwardCdpCommand.ensureActiveTab')
     await ensureActiveTabAttachedFromRelay({ force: false, tabId: requestedTabId || undefined })
@@ -1118,19 +1140,6 @@ async function handleForwardCdpCommand(msg) {
         }
         throw err
       }
-    }
-
-    if (method === 'Target.createTarget') {
-      if (!allowTargetCreate) {
-        throw new Error('Target.createTarget is disabled. Enable "Allow agent to open new background tabs" in the popup.')
-      }
-      const url = typeof params?.url === 'string' ? params.url : 'about:blank'
-      dbg('handleForwardCdpCommand.targetCreate', { requestedUrl: url })
-      const tab = await chrome.tabs.create({ url, active: false })
-      if (!tab.id) throw new Error('Failed to create tab')
-      await new Promise((r) => setTimeout(r, 100))
-      const attached = await attachTab(tab.id)
-      return { targetId: attached.targetId }
     }
 
     if (method === 'Target.closeTarget') {
