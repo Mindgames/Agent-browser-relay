@@ -129,7 +129,7 @@ This refreshes sparse state and restores all missing tracked directories in the 
    If the workflow will open new tabs via `Target.createTarget`, also run:
 
    ```bash
-   node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --tab-id "<TAB_ID>" --check --wait-for-attach --require-target-create --attach-timeout-ms 120000
+   node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --check --require-target-create
    ```
 
    Continue only when this check succeeds.
@@ -158,9 +158,10 @@ This refreshes sparse state and restores all missing tracked directories in the 
 - Agent must never take control of a random Chrome browser/profile/window; it may operate only on the explicitly attached and leased target tab.
 - On a fresh machine, agent must tell the human to load the primary extension path from `npm run extension:path` before attach/read steps. After `skills add`, that is normally `~/.agents/skills/agent-browser-relay/extension`.
 - After relay startup (`relay:global:start` / `relay:global:install` or `relay:start`), agent must stop and ask the human to open the popup once, then run `npm run extension:status -- --wait-for-connected --connected-timeout-ms 120000`.
-- Only after `extension:status` succeeds may the agent ask the human to attach the target tab, then wait for confirmation.
+- Only after `extension:status` succeeds may the agent either ask the human to attach the target tab, or rely on enabled target-create permission for first-tab creation workflows.
 - Agent must run `node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --tab-id "<TAB_ID>" --check --wait-for-attach --attach-timeout-ms 120000` before any data read and continue only on success.
 - For workflows that create tabs with `Target.createTarget`, agent must additionally require target-create readiness via `--require-target-create`.
+- When target-create readiness succeeds, the extension may create and auto-attach the first agent-controlled tab for that session even when no tab lease exists yet.
 - For all agent runs (single-agent and concurrent), agent must use tab leasing by setting `--tab-id <tabId>` on all read/check commands.
 - Agent must resolve `tabId` from relay status (`/status` or `npm run relay:status -- --all`) and explicitly target that tab.
 - If the requested `tabId` is not present in status `attachedTabs`, agent must stop and ask the human to re-attach that tab before continuing.
@@ -182,9 +183,9 @@ Never run bare `curl` without a timeout for relay checks.
 1. Open and focus the target tab(s) in Chrome.
 2. Open the Agent Browser Relay popup once so Chrome wakes the extension.
 3. Confirm extension load with `npm run extension:status -- --wait-for-connected --connected-timeout-ms 120000`.
-4. Open the Agent Browser Relay popup and click "Attach this tab" for each tab an agent should use.
+4. For existing-tab workflows, open the Agent Browser Relay popup and click "Attach this tab" for each tab an agent should use.
 5. Resolve each target `tabId` from status output (`npm run relay:status -- --all --status-timeout-ms 3000`).
-6. Optional: spawn a new tab via relay CDP forwarding (`Target.createTarget`), then re-run status and resolve the new `tabId`.
+6. Optional: if **Allow agent to create new background tabs** is enabled, spawn a new tab via relay CDP forwarding (`Target.createTarget`) even before any tab lease exists, then re-run status and resolve the new `tabId`.
 7. Validate readiness before each read:
 
    ```bash

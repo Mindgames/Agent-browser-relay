@@ -1574,6 +1574,7 @@ async function checkBridge() {
     connected: false,
     error: null,
   }
+  const allowTablessTargetCreateCheck = requireTargetCreate && !Number.isInteger(requestedTabId)
 
   try {
     const status = await getRelayStatus(false)
@@ -1614,10 +1615,20 @@ async function checkBridge() {
 
     if (requireTargetCreate && relay.targetCreateAllowed !== true) {
       extension.error = relay.targetCreateAllowed === false
-        ? 'Target.createTarget is disabled. Enable "Allow agent to open new background tabs" in the extension popup.'
+        ? 'Target.createTarget is disabled. Enable "Allow agent to create new background tabs" in the extension popup.'
         : 'Target.createTarget readiness is unknown from relay status. Refresh the extension and retry.'
       return {
         ok: false,
+        relay,
+        extension,
+        source: getRelaySource(),
+      }
+    }
+
+    if (allowTablessTargetCreateCheck) {
+      extension.connected = true
+      return {
+        ok: true,
         relay,
         extension,
         source: getRelaySource(),
@@ -1839,7 +1850,7 @@ async function main() {
     }
 
     if (checkOnly) {
-      if (waitForAttach && attachTimeoutMs > 0) {
+      if (waitForAttach && attachTimeoutMs > 0 && !(requireTargetCreate && !Number.isInteger(requestedTabId))) {
         await waitForAttachmentReady({ timeoutMs: attachTimeoutMs, pollMs: attachPollMs })
       }
       const status = await checkBridge()
@@ -1982,7 +1993,7 @@ function printUsage() {
     [--retries 2] [--retry-delay-ms 400]
 
   --check: performs relay + extension handshake check only and exits.
-  --require-target-create: with --check, fails unless Target.createTarget is enabled in popup settings.
+  --require-target-create: with --check, fails unless Target.createTarget is enabled in popup settings; can be used without --tab-id for first-tab creation workflows.
   --tab-id: binds this run to a specific Chrome tab id using a relay session lease.
   --metadata: fetches active tab URL/title metadata without forcing DOM attach.
   --screenshot: capture a screenshot via CDP Page.captureScreenshot.

@@ -397,6 +397,10 @@ function claimTabLease(state, session, tabId, force = false) {
   return { ok: true, tabId: normalizedTabId, sessionId: session.sessionId }
 }
 
+function allowsLeaseFreeForwardMethod(method) {
+  return method === 'Target.createTarget'
+}
+
 function resolveSession(state, socket, params = {}, options = {}) {
   const requestedSessionId = parseRelaySessionId(params.sessionId)
   if (requestedSessionId) {
@@ -704,6 +708,37 @@ function onExtensionMessage(msg, socket, state) {
     const pending = state.pendingByRelayId.get(msg.id)
     if (!pending) return
 
+    if (
+      pending.forwardMethod === 'Target.createTarget' &&
+      Number.isInteger(msg?.result?.tabId) &&
+      typeof pending.relaySessionId === 'string'
+    ) {
+      const session = state.sessionsById.get(pending.relaySessionId)
+      if (!session || session.socket !== pending.socket) {
+        clearTimeout(pending.timer)
+        pendingByRelayIdDelete(state, msg.id)
+        safeSend(pending.socket, {
+          id: pending.requestId,
+          error: `Relay session ${pending.relaySessionId} is no longer available for Target.createTarget.`,
+        })
+        return
+      }
+      const lease = claimTabLease(state, session, msg.result.tabId, true)
+      if (!lease.ok) {
+        clearTimeout(pending.timer)
+        pendingByRelayIdDelete(state, msg.id)
+        safeSend(pending.socket, {
+          id: pending.requestId,
+          error: lease.error || `Failed to lease created tab ${msg.result.tabId}`,
+        })
+        return
+      }
+      if (msg.result && typeof msg.result === 'object' && !Array.isArray(msg.result)) {
+        msg.result.leasedTabId = msg.result.tabId
+        msg.result.relaySessionId = pending.relaySessionId
+      }
+    }
+
     const payload = {
       id: pending.requestId,
       ...(msg.result !== undefined ? { result: msg.result } : {}),
@@ -885,7 +920,14 @@ function bindForwardCommandToSessionLease(state, socket, forward) {
   forward.params = payloadParams
 
   const relaySessionId = parseRelaySessionId(payloadParams.relaySessionId)
+  const forwardMethod = typeof payloadParams.method === 'string' ? payloadParams.method : ''
   if (!relaySessionId) {
+    if (allowsLeaseFreeForwardMethod(forwardMethod)) {
+      return {
+        ok: false,
+        error: `${forwardMethod} requires an active relay session. Call Grais.relay.openSession first.`,
+      }
+    }
     return { ok: true, forward }
   }
 
@@ -906,6 +948,8 @@ function bindForwardCommandToSessionLease(state, socket, forward) {
     }
   } else if (Number.isInteger(session.leasedTabId)) {
     targetTabId = session.leasedTabId
+  } else if (allowsLeaseFreeForwardMethod(forwardMethod)) {
+    return { ok: true, forward }
   } else {
     return {
       ok: false,
@@ -1052,6 +1096,8 @@ function queueControllerCommand(state, forward, socket) {
   state.pendingByRelayId.set(relayId, {
     socket,
     requestId: forward.id,
+    forwardMethod: typeof forward?.params?.method === 'string' ? forward.params.method : null,
+    relaySessionId: parseRelaySessionId(forward?.params?.relaySessionId),
     timer: queueEntry.timer,
   })
 
@@ -1155,6 +1201,8 @@ function forwardControllerToExtension(state, forward, socket) {
   state.pendingByRelayId.set(relayId, {
     socket,
     requestId: forward.id,
+    forwardMethod: typeof forward?.params?.method === 'string' ? forward.params.method : null,
+    relaySessionId: parseRelaySessionId(forward?.params?.relaySessionId),
     timer: setTimeout(() => {
       pendingByRelayIdDelete(state, relayId)
       throwErrorToController(socket, forward.id, `Relay timed out after ${requestTimeoutMs}ms`)
