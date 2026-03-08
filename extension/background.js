@@ -354,6 +354,31 @@ async function syncAttachmentPrefs() {
   ])
 }
 
+async function persistAttachedTabState(tabId, opts = {}) {
+  const resolvedTabId = normalizeTabId(tabId)
+  if (!Number.isInteger(resolvedTabId)) return
+
+  const shouldPinTab =
+    opts.pinTab === true || !Number.isInteger(userPinnedTabId) || !tabs.has(userPinnedTabId)
+
+  await setRelayPortForTab(resolvedTabId, currentRelayPort)
+
+  userAttachmentEnabled = true
+  if (shouldPinTab) {
+    userPinnedTabId = resolvedTabId
+  }
+
+  manualDetachTabs.delete(resolvedTabId)
+  stopRelayReconnectLoop()
+  relayReconnectAttempts = 0
+
+  const persistTasks = [setUserAttachmentPref(true)]
+  if (Number.isInteger(userPinnedTabId)) {
+    persistTasks.push(setPinnedTabPref(userPinnedTabId))
+  }
+  await Promise.allSettled(persistTasks)
+}
+
 function scheduleActiveTabReattachFromEvent() {
   if (!userAttachmentEnabled) return
   if (!Number.isInteger(userPinnedTabId)) return
@@ -843,6 +868,7 @@ async function createManagedTargetTab(url = 'about:blank') {
   if (!tab.id) throw new Error('Failed to create tab')
   await new Promise((r) => setTimeout(r, 100))
   const attached = await attachTab(tab.id)
+  await persistAttachedTabState(tab.id, { pinTab: !userAttachmentEnabled })
   return {
     tabId: tab.id,
     sessionId: attached.sessionId,
@@ -982,14 +1008,7 @@ async function connectOrToggleForActiveTab(tab) {
     relayReconnectAttempts = 0
     await ensureRelayConnection(tabId)
     await attachTab(tabId)
-    await setRelayPortForTab(tabId, currentRelayPort)
-    userAttachmentEnabled = true
-    userPinnedTabId = tabId
-    await setUserAttachmentPref(true)
-    await setPinnedTabPref(tabId)
-    manualDetachTabs.delete(tabId)
-    stopRelayReconnectLoop()
-    relayReconnectAttempts = 0
+    await persistAttachedTabState(tabId, { pinTab: true })
   } catch (err) {
     dbg('connectOrToggleForActiveTab.connectFail', { tabId, error: err instanceof Error ? err.message : String(err) })
     tabs.delete(tabId)
