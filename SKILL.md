@@ -14,6 +14,7 @@ Fresh-machine rule:
 - the guaranteed Chrome load path after `skills add` is `~/.agents/skills/agent-browser-relay/extension`
 - `~/agent-browser-relay/extension` is only an optional visible convenience copy created by `npm run extension:install`
 - `npm run extension:path`, `npm run relay:start`, and `npm run relay:global:install` print the primary folder to load
+- opening the extension popup once after relay startup now wakes the extension and lets `npm run extension:status` confirm that Chrome actually loaded it
 - on a new machine, the human must load the primary path in `chrome://extensions` before attach/read steps. Do not treat a missing visible convenience copy as a sandbox or socket-permission issue.
 
 Defaults are set in code:
@@ -52,11 +53,21 @@ Override per command with `--host`, `--port`, and `--attach-timeout-ms` when nee
    - Run `npm run extension:path` from the installed skill directory any time you want the exact path printed again
    - `~/agent-browser-relay/extension` is optional; create it with `npm run extension:install` if you want a visible shortcut
 
-3. Attach the extension to the target tab (open toolbar popup and click attach)
+3. Confirm the extension is loaded in Chrome
+
+   Open the toolbar popup once after relay is running. The popup should show `Relay connected on <port>`.
+
+   Agent requirement: before any attach step on a fresh machine, ask the human to open the popup once, then confirm:
+
+   ```bash
+   npm run extension:status -- --wait-for-connected --connected-timeout-ms 120000
+   ```
+
+4. Attach the extension to the target tab (open toolbar popup and click attach)
 
    Optional per-tab relay: in the popup, set **Tab port** before clicking attach if this tab should use a non-default relay port.
 
-   Agent requirement: after `relay:start`, pause and ask the human to do this attach step, then wait for confirmation before continuing.
+   Agent requirement: after `extension:status` confirms Chrome loaded the extension, pause and ask the human to do this attach step, then wait for confirmation before continuing.
 
    If your `.agents` skill folder drops `extension/` after a `git fetch` or pull, repair it from the repo:
 
@@ -68,7 +79,7 @@ Override per command with `--host`, `--port`, and `--attach-timeout-ms` when nee
    git checkout -- .
    ```
 
-4. Check readiness and attach state
+5. Check readiness and attach state
 
    ```bash
    node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --tab-id "<TAB_ID>" --check --wait-for-attach --attach-timeout-ms "120000"
@@ -98,6 +109,7 @@ Override per command with `--host`, `--port`, and `--attach-timeout-ms` when nee
 - On a fresh machine, explicitly tell the human to load the primary extension path from `npm run extension:path` before any attach/read attempt. After `skills add`, that is normally `~/.agents/skills/agent-browser-relay/extension`.
 - Canonical commands:
   - `npm run extension:path`
+  - `npm run extension:status`
   - `npm run relay:start`
   - `npm run relay:status`
   - `npm run relay:stop`
@@ -106,7 +118,8 @@ Override per command with `--host`, `--port`, and `--attach-timeout-ms` when nee
   - `npm run relay:status -- --status-timeout-ms 3000`
   - `curl --max-time 3 -sS "http://127.0.0.1:18793/status"`
   - `npm run relay:status -- --all --status-timeout-ms 3000`
-- After `relay:start`, pause and ask the human to attach the target tab before any read.
+- After `relay:start`, pause and ask the human to open the popup once so `npm run extension:status -- --wait-for-connected --connected-timeout-ms 120000` can confirm Chrome actually loaded the extension.
+- Only after `extension:status` succeeds, ask the human to attach the target tab before any read.
 - Run `node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --tab-id "<TAB_ID>" --check --wait-for-attach --attach-timeout-ms "120000"` before reads and proceed only when it succeeds.
 - If the workflow will open tabs via `Target.createTarget`, run the same check with `--require-target-create` and proceed only when it succeeds.
 - For all agent runs (single-agent and concurrent), always pass `--tab-id <tabId>` on check/read commands so every operation is lease-scoped.

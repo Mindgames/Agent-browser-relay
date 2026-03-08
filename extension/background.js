@@ -1217,6 +1217,25 @@ async function initializeAttachmentState() {
   }
 }
 
+async function probeRelayConnectionForPopup(tabId, effectivePort) {
+  const requestedTabId = normalizeTabId(tabId)
+  if (!Number.isInteger(requestedTabId)) return null
+
+  const relayOpen = relayWs && relayWs.readyState === WebSocket.OPEN
+  const relayAlreadyMatchesPort = relayOpen && (!Number.isInteger(effectivePort) || currentRelayPort === effectivePort)
+  if (relayAlreadyMatchesPort) return null
+
+  // Only auto-probe when nothing is currently attached so opening the popup cannot disrupt active relay work.
+  if (tabs.size > 0 || userAttachmentEnabled) return null
+
+  try {
+    await ensureRelayConnection(requestedTabId)
+    return null
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error)
+  }
+}
+
 function onDebuggerEvent(source, method, params) {
   dbg('onDebuggerEvent', { tabId: source?.tabId, method })
   const tabId = source.tabId
@@ -1302,8 +1321,13 @@ chrome.runtime.onInstalled.addListener((details) => {
 async function getPopupState(tabId, includeAllTabs = true) {
   await ensurePreferenceStateLoaded()
   const requestedTabId = normalizeTabId(tabId)
-  const relayConnected = relayWs && relayWs.readyState === WebSocket.OPEN
   const { defaultPort, tabPorts } = await getRelayPortConfig()
+  const mappedPort = Number.isInteger(requestedTabId) ? parseRelayPort(tabPorts[requestedTabId], NaN) : NaN
+  const effectivePort = Number.isInteger(requestedTabId)
+    ? await getRelayPort(requestedTabId)
+    : defaultPort
+  const relayConnectError = await probeRelayConnectionForPopup(requestedTabId, effectivePort)
+  const relayConnected = relayWs && relayWs.readyState === WebSocket.OPEN
 
   let activeTab = null
   if (Number.isInteger(requestedTabId)) {
@@ -1324,11 +1348,6 @@ async function getPopupState(tabId, includeAllTabs = true) {
     })
   }
 
-  const mappedPort = Number.isInteger(requestedTabId) ? parseRelayPort(tabPorts[requestedTabId], NaN) : NaN
-  const effectivePort = Number.isInteger(requestedTabId)
-    ? await getRelayPort(requestedTabId)
-    : defaultPort
-
   return {
     requestedTabId,
     activeTab: activeTab
@@ -1341,6 +1360,7 @@ async function getPopupState(tabId, includeAllTabs = true) {
       : null,
     defaultPort,
     relayPortConnected: relayConnected ? currentRelayPort : null,
+    relayConnectError,
     mappedPort: Number.isInteger(mappedPort) ? mappedPort : null,
     effectivePort: Number.isInteger(effectivePort) ? effectivePort : defaultPort,
     userAttachmentEnabled,

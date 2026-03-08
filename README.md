@@ -46,19 +46,30 @@ After install with the `skills` installer, the skill is available at:
 
 Run `npm run extension:path` from the installed skill directory any time you want the exact current load path printed again.
 `relay:start`, `relay:global:install`, and `read-active-tab.js` also print the primary load path + version sync status as stderr hints.
+Open the toolbar popup once after starting relay. The popup now wakes the extension and should show `Relay connected on <port>` when Chrome has actually loaded it.
+You can confirm that from the terminal with `npm run extension:status -- --wait-for-connected --connected-timeout-ms 120000`.
 If you specifically want the visible convenience copy at `~/agent-browser-relay/extension`, run `npm run extension:install` from the installed skill directory.
 5. Pin the **Agent Browser Relay** toolbar icon
 
-### 3) Attach tabs and allow broader tab control
+### 3) Confirm the extension is loaded in Chrome
 
 1. Open the Chrome tab you want the agent to use.
 2. Open the **Agent Browser Relay** popup from the toolbar icon.
-3. Click **Attach this tab** and confirm the badge shows `ON`.
-4. If you want the agent to open additional background tabs, enable **Allow agent to open new background tabs** in the popup.
-5. In **Connections**, click **Copy ID** for the attached tab and send it to your agent, for example: `Use tab 4581930`.
-6. Repeat for every tab you want the agent to access.
+3. Wait for the popup status to show `Relay connected on <port>`.
+4. Or confirm from the terminal:
 
-### 4) Showcase: User + Agent Flow
+```bash
+npm run extension:status -- --wait-for-connected --connected-timeout-ms 120000
+```
+
+### 4) Attach tabs and allow broader tab control
+
+1. With the popup open on the target tab, click **Attach this tab** and confirm the badge shows `ON`.
+2. If you want the agent to open additional background tabs, enable **Allow agent to open new background tabs** in the popup.
+3. In **Connections**, click **Copy ID** for the attached tab and send it to your agent, for example: `Use tab 4581930`.
+4. Repeat for every tab you want the agent to access.
+
+### 5) Showcase: User + Agent Flow
 
 Example prompt to your agent:
 
@@ -68,9 +79,10 @@ Expected flow:
 
 1. Agent starts relay (for example `npm run relay:global:install -- --ports 18793 --timeout 12000`).
 2. On a new machine, agent tells you to load `~/.agents/skills/agent-browser-relay/extension` in `chrome://extensions` first, or asks you to run `npm run extension:path`.
-3. Agent asks you to open/focus the target tab and click **Attach this tab** in the popup.
-4. You attach the tab and confirm.
-5. Agent runs the attach check and continues reads using the tab ID you shared.
+3. Agent asks you to open the popup once so Chrome proves the extension is loaded, then checks `npm run extension:status`.
+4. Agent asks you to click **Attach this tab** in the popup.
+5. You attach the tab and confirm.
+6. Agent runs the attach check and continues reads using the tab ID you shared.
 
 ## Skill Directory Structure (`.agents` + `.claude`)
 
@@ -93,6 +105,7 @@ Why this matters: installer-based setup gives a stable path and keeps Codex/Clau
 - `relay-server.js`: local relay + CDP tunnel.
 - `scripts/relay-service.js`: global `launchd/systemd --user` service lifecycle.
 - `scripts/read-active-tab.js`: read/check CLI that prints JSON.
+- `scripts/extension-status.js`: confirms whether Chrome has actually loaded the extension into the running profile.
 - Relay tab leasing (`--tab-id`): isolates concurrent agents to specific tabs.
 - `scripts/extension-install-helper.js`: prints the primary extension path and optionally refreshes the visible convenience copy.
 
@@ -148,9 +161,10 @@ npm run relay:start -- --host 127.0.0.1 --port 18793 --status-timeout-ms 3000
 
 After relay startup, a human must attach the target tab:
 1. Open/focus target tab in Chrome.
-2. Open Agent Browser Relay popup.
-3. Click **Attach this tab**.
-4. Confirm badge shows `ON`.
+2. Open Agent Browser Relay popup once and confirm the popup shows `Relay connected on <port>`.
+3. Or confirm from the terminal with `npm run extension:status -- --wait-for-connected --connected-timeout-ms 120000`.
+4. Click **Attach this tab**.
+5. Confirm badge shows `ON`.
 
 Then run:
 
@@ -243,6 +257,11 @@ npm run relay:status -- --status-timeout-ms 3000
   - Run `npm run extension:path` from the installed skill directory.
   - Load the primary path it prints in `chrome://extensions`.
 
+- Unsure whether Chrome actually loaded the extension:
+  - Open the Agent Browser Relay popup once.
+  - Run `npm run extension:status -- --wait-for-connected --connected-timeout-ms 120000`.
+  - Continue only when it reports `Chrome extension connected`.
+
 - Visible convenience folder missing after install:
   - Run `npm run extension:install` from the installed skill directory.
   - Confirm `~/agent-browser-relay/extension` now exists if you want that shortcut.
@@ -274,6 +293,7 @@ Use only these script names:
 - `npm run relay:status`
 - `npm run relay:stop`
 - `npm run extension:path`
+- `npm run extension:status`
 - `node scripts/read-active-tab.js`
 
 Do not restart relay just because local files changed. Restart only when explicitly requested by a human, or for hard recovery failures.

@@ -41,17 +41,7 @@ echo "[preflight] expected relay port: ${RELAY_PORT} on ${RELAY_HOST}"
 echo "[preflight] attach timeout: ${ATTACH_TIMEOUT_MS}ms"
 echo "[preflight] require target-create: ${REQUIRE_TARGET_CREATE}"
 
-status="$(curl --max-time 3 -sS "${RELAY_STATUS_URL}" || true)"
-if [[ -z "$status" ]]; then
-  echo "[preflight] FAIL: relay did not respond" >&2
-  exit 1
-fi
-
-echo "$status" | grep -q '"extensionConnected":true' || {
-  echo "[preflight] FAIL: extension not connected (expected extensionConnected=true)." >&2
-  echo "[preflight] extension status: $status" >&2
-  exit 1
-}
+node scripts/extension-status.js --host "${RELAY_HOST}" --port "${RELAY_PORT}" --status-timeout-ms 3000
 
 echo "[preflight] relay attached, now checking script bridge..."
 CHECK_ARGS=(--check --wait-for-attach --attach-timeout-ms "${ATTACH_TIMEOUT_MS}" --host "${RELAY_HOST}" --port "${RELAY_PORT}")

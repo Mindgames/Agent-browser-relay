@@ -88,6 +88,7 @@ async function startRelay() {
         ? ` (auto-stop in ${Math.ceil(autoStopInMs / 1000)}s)`
         : ''
     console.log(`Relay already reachable at http://${host}:${port}/status${statusLabel}${ttlLabel}`)
+    await printExtensionConnectionGuidance()
     return
   }
 
@@ -122,6 +123,7 @@ async function startRelay() {
   const ttlLabel =
     autoStopMs > 0 ? ` (auto-stop in ${Math.ceil(autoStopMs / 1000)}s)` : ' (auto-stop disabled)'
   console.log(`Relay started in background at http://${host}:${port}/status${pidLabel}${ttlLabel}`)
+  await printExtensionConnectionGuidance()
 }
 
 function prepareVisibleExtensionBundle() {
@@ -237,6 +239,33 @@ async function printStatus() {
       Number.isInteger(state?.autoStopAt) && state.autoStopAt > Date.now() ? state.autoStopAt - Date.now() : null,
   }
   console.log(JSON.stringify(payload, null, 2))
+}
+
+async function printExtensionConnectionGuidance() {
+  const status = await fetchRelayStatus(false, { all: true })
+  if (!status.ok) return
+
+  const targetPorts = Array.isArray(status.ports) ? status.ports : []
+  const target = targetPorts.find((entry) => Number(entry?.port) === port) || null
+  if (target?.extensionConnected === true) {
+    console.log(`[agent-browser-relay] Chrome extension is connected on relay port ${port}.`)
+    return
+  }
+
+  const extensionPorts = Array.isArray(status.extensionPorts)
+    ? status.extensionPorts.filter((value) => Number.isInteger(Number(value))).map((value) => Number(value))
+    : []
+  const portHint = extensionPorts.length > 0
+    ? ` It is currently connected on other port(s): ${extensionPorts.join(', ')}.`
+    : ''
+
+  console.warn(
+    [
+      `[agent-browser-relay] Relay is up, but Chrome extension load is not confirmed on port ${port}.${portHint}`,
+      'Open the Agent Browser Relay popup once in Chrome to wake the extension, then run:',
+      `[agent-browser-relay]   npm run extension:status -- --port "${port}" --status-timeout-ms ${statusTimeoutMs}`,
+    ].join('\n'),
+  )
 }
 
 function launchRelayProcess() {

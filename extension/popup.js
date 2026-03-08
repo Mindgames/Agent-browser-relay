@@ -157,9 +157,17 @@ async function refresh() {
   try {
     const tabId = await getCurrentActiveTabId()
     const response = await sendMessage({ type: 'grais.popup.getState', tabId, includeAllTabs: true })
-    setStatus('Refreshed', 'ok')
     renderAttachmentControl(response)
     renderConnectedTabs(response)
+    if (response.relayConnectError) {
+      setStatus(response.relayConnectError, 'err')
+      return
+    }
+    if (Number.isInteger(response.relayPortConnected)) {
+      setStatus(`Relay connected on ${response.relayPortConnected}`, 'ok')
+      return
+    }
+    setStatus('Extension loaded, but relay is not connected yet', 'err')
   } catch (err) {
     setStatus(err.message || 'Failed to load state', 'err')
   }
