@@ -194,6 +194,12 @@ Or explicit host/port:
 npm run relay:start -- --host 127.0.0.1 --port 18793 --status-timeout-ms 3000
 ```
 
+`relay:start` now keeps the relay running until you stop it or the underlying process is restarted. If you want a bounded one-off session, pass `--auto-stop-ms` explicitly:
+
+```bash
+node scripts/relay-manager.js start --auto-stop-ms 10800000
+```
+
 ## Required Attach Gate (Before Any Read)
 
 After relay startup, a human must confirm the extension is loaded before any read or tab-create workflow:

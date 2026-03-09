@@ -12,7 +12,7 @@ const DEFAULT_TIMEOUT_MS = 12000
 const DEFAULT_START_TIMEOUT_MS = 10000
 const DEFAULT_START_POLL_MS = 250
 const DEFAULT_STATUS_TIMEOUT_MS = 1200
-const DEFAULT_AUTO_STOP_MS = 2 * 60 * 60 * 1000
+const DEFAULT_AUTO_STOP_MS = 0
 const REPO_ROOT = path.resolve(fs.realpathSync(__dirname), '..')
 const RELAY_FILE_PREFIX = 'grais-debugger-relay'
 const ALLOWED_PORT_ACTIONS = ['add', 'remove']
@@ -566,7 +566,7 @@ function printUsage() {
   console.log(`Usage:
   Relay manager uses in-code defaults (${DEFAULT_HOST}:${DEFAULT_PORT}).
   Override with --host / --port / --ports when needed.
-  node scripts/relay-manager.js start [--host ${DEFAULT_HOST}] [--port ${DEFAULT_PORT}] [--ports ${DEFAULT_PORT},18794] [--timeout 12000] [--status-timeout-ms 1200] [--start-timeout-ms 10000] [--auto-stop-ms 7200000]
+  node scripts/relay-manager.js start [--host ${DEFAULT_HOST}] [--port ${DEFAULT_PORT}] [--ports ${DEFAULT_PORT},18794] [--timeout 12000] [--status-timeout-ms 1200] [--start-timeout-ms 10000] [--auto-stop-ms 0]
   node scripts/relay-manager.js status [--host ${DEFAULT_HOST}] [--port ${DEFAULT_PORT}] [--ports ${DEFAULT_PORT},18794] [--status-timeout-ms 1200] [--all]
   node scripts/relay-manager.js ports [--host ${DEFAULT_HOST}] --action add|remove --ports ${DEFAULT_PORT},18794 [--status-timeout-ms 1200]
   node scripts/relay-manager.js stop [--host ${DEFAULT_HOST}] [--port ${DEFAULT_PORT}] [--status-timeout-ms 1200]

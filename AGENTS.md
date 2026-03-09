@@ -79,12 +79,11 @@ Default host/port is `127.0.0.1:18793` (set in code). Override per command with 
    npm run relay:start -- --host "127.0.0.1" --port "18793"
    ```
 
-4. `relay:start` keeps relay running and auto-stops after 2 hours by default (to avoid start/stop churn).
-   Override when needed:
+4. `relay:start` keeps relay running until it is explicitly stopped or the underlying process is restarted.
+   If you want a bounded session, pass `--auto-stop-ms` explicitly:
 
    ```bash
   node scripts/relay-manager.js start --auto-stop-ms 10800000
-  node scripts/relay-manager.js start --auto-stop-ms 0
   ```
 
 If the `.agents` working tree ever loses subfolders after fetch/reset operations (for example `extension/`), run:
