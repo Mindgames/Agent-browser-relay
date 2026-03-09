@@ -37,11 +37,10 @@ Override per command with `--host`, `--port`, and `--attach-timeout-ms` when nee
    npm run relay:start -- --host "127.0.0.1" --port "18793" --status-timeout-ms 3000
    ```
 
-   `relay:start` auto-stops after 2 hours by default. Override if needed:
+   `relay:start` keeps running until you stop it or the process is restarted. If you want a bounded session, pass `--auto-stop-ms` explicitly:
 
    ```bash
    node scripts/relay-manager.js start --auto-stop-ms 10800000
-   node scripts/relay-manager.js start --auto-stop-ms 0
    ```
 
 2. Load extension in Chrome
