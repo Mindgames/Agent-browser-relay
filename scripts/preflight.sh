@@ -41,12 +41,9 @@ echo "[preflight] expected relay port: ${RELAY_PORT} on ${RELAY_HOST}"
 echo "[preflight] attach timeout: ${ATTACH_TIMEOUT_MS}ms"
 echo "[preflight] require target-create: ${REQUIRE_TARGET_CREATE}"
 
-node scripts/extension-status.js --host "${RELAY_HOST}" --port "${RELAY_PORT}" --status-timeout-ms 3000
-
-echo "[preflight] relay attached, now checking script bridge..."
-CHECK_ARGS=(--check --wait-for-attach --attach-timeout-ms "${ATTACH_TIMEOUT_MS}" --host "${RELAY_HOST}" --port "${RELAY_PORT}")
+CHECK_ARGS=(doctor --host "${RELAY_HOST}" --port "${RELAY_PORT}" --status-timeout-ms 3000 --attach-timeout-ms "${ATTACH_TIMEOUT_MS}")
 if [[ "$REQUIRE_TARGET_CREATE" -eq 1 ]]; then
   CHECK_ARGS+=(--require-target-create)
 fi
-node scripts/read-active-tab.js "${CHECK_ARGS[@]}"
+node "${SKILL_ROOT}/scripts/relay-manager.js" "${CHECK_ARGS[@]}"
 echo "[preflight] OK: relay + extension bridge are ready"

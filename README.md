@@ -16,6 +16,7 @@ Agent Browser Relay lets your agent control and read from tabs in your real Chro
 - Chrome extension bridge for attach/detach from the toolbar popup.
 - Local relay service with global always-on mode (`launchd` / `systemd --user`).
 - Scriptable read/check interface (`node scripts/read-active-tab.js`) for agent workflows.
+- One-command readiness preflight via `npm run relay:doctor`.
 - Explicit tab leasing model for multi-agent safety on shared relay infrastructure.
 
 ## Quick Start (Human Setup)
@@ -43,7 +44,8 @@ Examples:
 - `/Users/you/Projects/Agent-browser-relay/extension`
 - `/Users/you/code/agent-browser-relay/extension`
 
-To print the exact path for the copy you are using, run `npm run extension:path` from that copy.
+To print the exact paths for the copy you are using, run `npm run extension:path` from that copy.
+It now prints the primary extension folder plus stable absolute paths for `read-active-tab.js` and `preflight.sh`.
 
 Notes:
 - `skills add` guarantees the installed skill at `~/.agents/skills/agent-browser-relay`
@@ -119,7 +121,7 @@ Expected flow:
 3. Agent asks you to open the popup once so Chrome proves the extension is loaded, then checks `npm run extension:status`.
 4. If the workflow needs a specific existing tab, agent asks you to click **Attach this tab** in the popup.
 5. If the workflow only needs a new agent-created tab, the agent can create it itself once **Allow agent to create new background tabs** is enabled.
-6. Agent runs the attach or target-create readiness check and continues.
+6. Agent runs `npm run relay:doctor -- --tab-id 4581930 --json` (or `--require-target-create` for first-tab creation workflows) and continues only when it returns success.
 
 ## Relay Skill Paths
 
@@ -142,6 +144,7 @@ Why this matters: the relay extension should be loaded from an `agent-browser-re
 - `relay-server.js`: local relay + CDP tunnel.
 - `scripts/relay-service.js`: global `launchd/systemd --user` service lifecycle.
 - `scripts/read-active-tab.js`: read/check CLI that prints JSON.
+- `scripts/relay-manager.js`: relay lifecycle plus the canonical `doctor` preflight wrapper.
 - `scripts/extension-status.js`: confirms whether Chrome has actually loaded the extension into the running profile.
 - Relay tab leasing (`--tab-id`): isolates concurrent agents to specific tabs.
 - `scripts/extension-install-helper.js`: prints the primary extension path and optionally refreshes the visible convenience copy.
@@ -307,8 +310,12 @@ npm run relay:status -- --status-timeout-ms 3000
 
 - Agent says it cannot create a new tab yet:
   - Enable **Allow agent to create new background tabs** in the popup.
-  - Re-run `node scripts/read-active-tab.js --check --require-target-create`.
+  - Re-run `npm run relay:doctor -- --require-target-create --json`.
   - If you want the agent to use an existing tab instead, attach that tab and pass its `tabId`.
+
+- Unsure whether relay + extension + attached tab are all actually ready:
+  - Run `npm run relay:doctor -- --tab-id "<TAB_ID>" --json`.
+  - Inspect `blocker.code`, `blocker.summary`, and `blocker.nextAction`.
 
 - Visible convenience folder missing after install:
   - Run `npm run extension:install` from the installed skill directory.
@@ -339,6 +346,7 @@ Use only these script names:
 - `npm run relay:global:stop`
 - `npm run relay:start`
 - `npm run relay:status`
+- `npm run relay:doctor`
 - `npm run relay:stop`
 - `npm run extension:path`
 - `npm run extension:status`

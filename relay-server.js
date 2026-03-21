@@ -120,9 +120,28 @@ function countConnectedControllerClients(state) {
   return count
 }
 
+function summarizeLeaseVisibility(state) {
+  const attachedTabs = listAttachedTabsWithLease(state)
+  const attachedLeases = attachedTabs
+    .filter((tab) => typeof tab?.leasedSessionId === 'string' && tab.leasedSessionId.length > 0)
+    .map(({ tabId, leasedSessionId }) => ({ tabId, sessionId: leasedSessionId }))
+  const staleTabLeases = summarizeStaleTabLeases(state, attachedTabs)
+
+  return {
+    attachedTabs,
+    attachedLeases,
+    staleTabLeases,
+    attachedTabCount: attachedTabs.length,
+    attachedLeaseCount: attachedLeases.length,
+    leasedTabCount: state.tabLeases.size,
+    staleLeaseCount: staleTabLeases.length,
+  }
+}
+
 function summarizePortState(state) {
   const extensionConnected = Boolean(state.extensionSocket && state.extensionSocket.readyState === state.extensionSocket.OPEN)
   const extensionLastSeenAgoMs = state.extensionLastSeenTs ? Date.now() - state.extensionLastSeenTs : null
+  const leaseState = summarizeLeaseVisibility(state)
 
   return {
     port: state.relayPort,
@@ -132,12 +151,14 @@ function summarizePortState(state) {
     connectedControllerClients: countConnectedControllerClients(state),
     pendingCommands: state.pendingByRelayId.size,
     sessionCount: state.sessionsById.size,
-    leasedTabCount: state.tabLeases.size,
+    attachedTabCount: leaseState.attachedTabCount,
+    attachedLeaseCount: leaseState.attachedLeaseCount,
+    leasedTabCount: leaseState.leasedTabCount,
+    staleLeaseCount: leaseState.staleLeaseCount,
     activeTab: state.extensionHeartbeatState?.activeTab || null,
-    attachedTabs: Array.isArray(state.extensionHeartbeatState?.attachedTabs)
-      ? state.extensionHeartbeatState.attachedTabs
-      : [],
-    tabLeases: summarizeTabLeases(state),
+    attachedTabs: leaseState.attachedTabs,
+    tabLeases: leaseState.attachedLeases,
+    staleTabLeases: leaseState.staleTabLeases,
     lastHeartbeatTs: state.extensionHeartbeatState?.ts || null,
     extensionVersion: state.extensionHeartbeatState?.extensionVersion || null,
     extensionName: state.extensionHeartbeatState?.extensionName || null,
@@ -153,6 +174,8 @@ function summarizePortState(state) {
 }
 
 function getSinglePortStatus(state) {
+  const leaseState = summarizeLeaseVisibility(state)
+
   return {
     ok: true,
     service: 'grais-debugger-relay',
@@ -164,12 +187,14 @@ function getSinglePortStatus(state) {
     connectedControllerClients: countConnectedControllerClients(state),
     pendingCommands: state.pendingByRelayId.size,
     sessionCount: state.sessionsById.size,
-    leasedTabCount: state.tabLeases.size,
+    attachedTabCount: leaseState.attachedTabCount,
+    attachedLeaseCount: leaseState.attachedLeaseCount,
+    leasedTabCount: leaseState.leasedTabCount,
+    staleLeaseCount: leaseState.staleLeaseCount,
     activeTab: state.extensionHeartbeatState?.activeTab || null,
-    attachedTabs: Array.isArray(state.extensionHeartbeatState?.attachedTabs)
-      ? state.extensionHeartbeatState.attachedTabs
-      : [],
-    tabLeases: summarizeTabLeases(state),
+    attachedTabs: leaseState.attachedTabs,
+    tabLeases: leaseState.attachedLeases,
+    staleTabLeases: leaseState.staleTabLeases,
     extensionVersion: state.extensionHeartbeatState?.extensionVersion || null,
     extensionName: state.extensionHeartbeatState?.extensionName || null,
     extensionCapabilities:
@@ -190,6 +215,12 @@ function summarizeTabLeases(state) {
   }
   leases.sort((a, b) => a.tabId - b.tabId)
   return leases
+}
+
+function summarizeStaleTabLeases(state, attachedTabs = null) {
+  const attached = Array.isArray(attachedTabs) ? attachedTabs : listAttachedTabsWithLease(state)
+  const attachedTabIds = new Set(attached.map((tab) => tab.tabId).filter((tabId) => Number.isInteger(tabId)))
+  return summarizeTabLeases(state).filter((lease) => !attachedTabIds.has(lease.tabId))
 }
 
 function getStatusPayload(targetPort = null, preferAll = false) {
@@ -379,7 +410,10 @@ function claimTabLease(state, session, tabId, force = false) {
   const existingSessionId = state.tabLeases.get(normalizedTabId)
   if (existingSessionId && existingSessionId !== session.sessionId) {
     if (!force) {
-      return { ok: false, error: `Tab ${normalizedTabId} is already leased by another session` }
+      return {
+        ok: false,
+        error: `Tab ${normalizedTabId} is already leased by session ${existingSessionId}. Choose another attached tab or wait for that session to release it.`,
+      }
     }
     const existingSession = state.sessionsById.get(existingSessionId)
     if (existingSession) {

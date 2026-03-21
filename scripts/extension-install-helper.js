@@ -143,10 +143,14 @@ function refreshInstallBundle(log = () => {}, options = {}) {
   const sourceVersion = readManifestVersion(SOURCE_EXTENSION_PATH)
   const relayVersion = readPackageVersion()
   const primaryTarget = resolvePrimaryLoadTarget()
+  const primaryRoot = path.dirname(primaryTarget.path)
   const primaryVersion =
     primaryTarget.path === SOURCE_EXTENSION_PATH
       ? sourceVersion
       : readManifestVersion(primaryTarget.path)
+  const readActiveTabPath = path.join(primaryRoot, 'scripts', 'read-active-tab.js')
+  const preflightPath = path.join(primaryRoot, 'scripts', 'preflight.sh')
+  const relayManagerPath = path.join(primaryRoot, 'scripts', 'relay-manager.js')
 
   let visibleVersion = readManifestVersion(VISIBLE_EXTENSION_PATH)
   let updated = false
@@ -157,6 +161,10 @@ function refreshInstallBundle(log = () => {}, options = {}) {
       ok: false,
       path: primaryTarget.path,
       pathKind: primaryTarget.kind,
+      rootPath: primaryRoot,
+      readActiveTabPath,
+      preflightPath,
+      relayManagerPath,
       sourcePath: SOURCE_EXTENSION_PATH,
       visiblePath: VISIBLE_EXTENSION_PATH,
       installedVersion: primaryVersion,
@@ -255,6 +263,10 @@ function refreshInstallBundle(log = () => {}, options = {}) {
     ok: prepareVisible ? !copyFailed : true,
     path: primaryTarget.path,
     pathKind: primaryTarget.kind,
+    rootPath: primaryRoot,
+    readActiveTabPath,
+    preflightPath,
+    relayManagerPath,
     sourcePath: SOURCE_EXTENSION_PATH,
     visiblePath: VISIBLE_EXTENSION_PATH,
     installedVersion: primaryVersion,
@@ -316,9 +328,15 @@ function parseCliArgs(args) {
 }
 
 function printPathSummary(result) {
+  console.log('Primary skill root:')
+  console.log(`  ${result.rootPath}`)
   console.log('Primary Chrome extension path:')
   console.log(`  ${result.path}`)
   console.log(`Primary path source: ${describePrimaryLoadPathKind(result.pathKind)}`)
+  console.log('Stable read CLI path:')
+  console.log(`  ${result.readActiveTabPath}`)
+  console.log('Stable preflight path:')
+  console.log(`  ${result.preflightPath}`)
 
   if (result.visiblePathReady) {
     console.log('Optional visible convenience path:')
@@ -343,8 +361,8 @@ function runCli() {
   if (args.help) {
     console.log('Usage:')
     console.log('  node scripts/extension-install-helper.js           # prepare optional visible convenience path')
-    console.log('  node scripts/extension-install-helper.js --paths   # print primary extension path to load in Chrome')
-    console.log('  node scripts/extension-install-helper.js --json    # output install status as JSON')
+    console.log('  node scripts/extension-install-helper.js --paths   # print primary extension + stable script paths')
+    console.log('  node scripts/extension-install-helper.js --json    # output install status and paths as JSON')
     return
   }
 

@@ -52,7 +52,7 @@ Default host/port is `127.0.0.1:18793` (set in code). Override per command with 
    - Load unpacked and select the path that matches how this copy was installed:
      - `~/.agents/skills/agent-browser-relay/extension` (global `skills add` install)
      - `~/.agents/skills/private/agent-browser-relay/extension` (`npm run codex:install` compat path)
-   - `npm run extension:path` prints the exact current primary load path again
+   - `npm run extension:path` prints the exact current primary load path again, plus stable absolute paths for `read-active-tab.js` and `preflight.sh`
    - After relay startup, open the popup once and use `npm run extension:status` to confirm Chrome actually loaded the extension
    - Pin Agent Browser Relay icon to the toolbar
    - Run `npm install` once if this checkout has never installed dependencies.
@@ -128,13 +128,13 @@ This refreshes sparse state and restores all missing tracked directories in the 
    - Before any read, the agent must run:
 
    ```bash
-   node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --tab-id "<TAB_ID>" --check --wait-for-attach --attach-timeout-ms 120000
+   npm run relay:doctor -- --host "127.0.0.1" --port "18793" --tab-id "<TAB_ID>" --json
    ```
 
    If the workflow will open new tabs via `Target.createTarget`, also run:
 
    ```bash
-   node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --check --require-target-create
+   npm run relay:doctor -- --host "127.0.0.1" --port "18793" --require-target-create --json
    ```
 
    Continue only when this check succeeds.
@@ -156,15 +156,17 @@ This refreshes sparse state and restores all missing tracked directories in the 
   - `npm run relay:global:stop`
   - `npm run relay:start`
   - `npm run relay:status`
+  - `npm run relay:doctor`
   - `npm run relay:stop`
   - `node scripts/read-active-tab.js`
 - Gateway-only rule: agent must communicate with Chrome only via this relay gateway (`/status` + `node scripts/read-active-tab.js`).
 - Agent must not use direct browser automation/control tools (for example Playwright, Puppeteer, Selenium, `agent-browser`, or ad-hoc Chrome control scripts) for this workflow.
 - Agent must never take control of a random Chrome browser/profile/window; it may operate only on the explicitly attached and leased target tab.
 - On a fresh machine, agent must tell the human to load the primary extension path from `npm run extension:path` before attach/read steps. After `skills add`, that is normally `~/.agents/skills/agent-browser-relay/extension`.
+- If the current working directory is not the installed skill root, agent must use the stable absolute `read-active-tab.js` path printed by `npm run extension:path` instead of assuming `node scripts/read-active-tab.js` is valid from the current cwd.
 - After relay startup (`relay:global:start` / `relay:global:install` or `relay:start`), agent must stop and ask the human to open the popup once, then run `npm run extension:status -- --wait-for-connected --connected-timeout-ms 120000`.
 - Only after `extension:status` succeeds may the agent either ask the human to attach the target tab, or rely on enabled target-create permission for first-tab creation workflows.
-- Agent must run `node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --tab-id "<TAB_ID>" --check --wait-for-attach --attach-timeout-ms 120000` before any data read and continue only on success.
+- Agent must run `npm run relay:doctor -- --host "127.0.0.1" --port "18793" --tab-id "<TAB_ID>" --json` before any data read and continue only on success.
 - For workflows that create tabs with `Target.createTarget`, agent must additionally require target-create readiness via `--require-target-create`.
 - When target-create readiness succeeds, the extension may create and auto-attach the first agent-controlled tab for that session even when no tab lease exists yet.
 - For all agent runs (single-agent and concurrent), agent must use tab leasing by setting `--tab-id <tabId>` on all read/check commands.
@@ -194,17 +196,14 @@ Never run bare `curl` without a timeout for relay checks.
 7. Validate readiness before each read:
 
    ```bash
-   node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --tab-id "<TAB_ID>" --check
-   ```
-   ```bash
-   node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --tab-id "<TAB_ID>" --check --wait-for-attach --attach-timeout-ms 120000
+   npm run relay:doctor -- --host "127.0.0.1" --port "18793" --tab-id "<TAB_ID>" --json
    ```
 
    ```bash
-   node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --tab-id "<TAB_ID>" --check --wait-for-attach --require-target-create --attach-timeout-ms 120000
+   npm run relay:doctor -- --host "127.0.0.1" --port "18793" --tab-id "<TAB_ID>" --require-target-create --json
    ```
 
-   If relay is reachable this command waits for an active attachment instead of immediate failure.
+   If relay is reachable this command returns a structured blocker with the next action instead of a generic attach timeout.
 
    Agent safety note: autonomous runs must use commands that include `--tab-id "<TAB_ID>"`. Unscoped variants below are manual/debug-only.
 
