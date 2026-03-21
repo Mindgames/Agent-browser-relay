@@ -14,6 +14,7 @@ Fresh-machine rule:
 - the guaranteed Chrome load path after `skills add` is `~/.agents/skills/agent-browser-relay/extension`
 - `~/agent-browser-relay/extension` is only an optional visible convenience copy created by `npm run extension:install`
 - `npm run extension:path`, `npm run relay:start`, and `npm run relay:global:install` print the primary folder to load
+- `npm run extension:path` also prints stable absolute paths for `read-active-tab.js` and `preflight.sh` so agents can avoid cwd-dependent invocation
 - opening the extension popup once after relay startup now wakes the extension and lets `npm run extension:status` confirm that Chrome actually loaded it
 - on a new machine, the human must load the primary path in `chrome://extensions` before attach/read steps. Do not treat a missing visible convenience copy as a sandbox or socket-permission issue.
 
@@ -82,14 +83,14 @@ Override per command with `--host`, `--port`, and `--attach-timeout-ms` when nee
 5. Check readiness and attach state
 
    ```bash
-   node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --tab-id "<TAB_ID>" --check --wait-for-attach --attach-timeout-ms "120000"
+   npm run relay:doctor -- --port "18793" --tab-id "<TAB_ID>" --json
    ```
 
    Resolve `<TAB_ID>` from status first (`npm run relay:status -- --all --status-timeout-ms 3000`).
    For all agent runs, use the assigned tab id:
 
    ```bash
-   node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --tab-id "<TAB_ID>" --check --wait-for-attach --attach-timeout-ms "120000"
+   npm run relay:doctor -- --host "127.0.0.1" --port "18793" --tab-id "<TAB_ID>" --json
    ```
 
    Continue only if this command returns success.
@@ -112,6 +113,7 @@ Override per command with `--host`, `--port`, and `--attach-timeout-ms` when nee
   - `npm run extension:status`
   - `npm run relay:start`
   - `npm run relay:status`
+  - `npm run relay:doctor`
   - `npm run relay:stop`
   - `node scripts/read-active-tab.js`
 - For relay health checks, always use explicit timeouts to avoid hangs:
@@ -120,8 +122,8 @@ Override per command with `--host`, `--port`, and `--attach-timeout-ms` when nee
   - `npm run relay:status -- --all --status-timeout-ms 3000`
 - After `relay:start`, pause and ask the human to open the popup once so `npm run extension:status -- --wait-for-connected --connected-timeout-ms 120000` can confirm Chrome actually loaded the extension.
 - Only after `extension:status` succeeds, either ask the human to attach the target tab before reads, or confirm that **Allow agent to create new background tabs** is enabled before first-tab creation workflows.
-- Run `node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --tab-id "<TAB_ID>" --check --wait-for-attach --attach-timeout-ms "120000"` before reads and proceed only when it succeeds.
-- If the workflow will open tabs via `Target.createTarget`, run `node scripts/read-active-tab.js --check --require-target-create` and proceed only when it succeeds.
+- Run `npm run relay:doctor -- --host "127.0.0.1" --port "18793" --tab-id "<TAB_ID>" --json` before reads and proceed only when it succeeds.
+- If the workflow will open tabs via `Target.createTarget`, run `npm run relay:doctor -- --host "127.0.0.1" --port "18793" --require-target-create --json` and proceed only when it succeeds.
 - For all agent runs (single-agent and concurrent), always pass `--tab-id <tabId>` on check/read commands so every operation is lease-scoped.
 - When `Target.createTarget` is enabled, the extension may create and auto-attach the first agent-controlled tab for the session without a human seed attach step.
 - Do not stop/restart relay during the task unless the human requests it or recovery is explicitly required.
@@ -141,6 +143,8 @@ Override per command with `--host`, `--port`, and `--attach-timeout-ms` when nee
    ```bash
    ./scripts/preflight.sh
    ```
+
+If the current working directory is not the installed skill root, use the absolute `Stable read CLI path` printed by `npm run extension:path` instead of a relative `node scripts/read-active-tab.js` path.
 
 ## Capabilities
 

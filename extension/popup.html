@@ -6,214 +6,386 @@
     <title>Agent Browser Relay</title>
     <style>
       :root {
-        color-scheme: light dark;
-        --accent: #3b82f6;
-        --bg: color-mix(in oklab, canvas 92%, canvasText 12%);
-        --card: color-mix(in oklab, canvas 94%, canvasText 6%);
-        --border: color-mix(in oklab, canvasText 22%, transparent);
-        --muted: color-mix(in oklab, canvasText 70%, transparent);
-        --danger: #ef4444;
-        font-family: ui-rounded, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color-scheme: dark;
+        --bg: #0b0b0c;
+        --panel: #131416;
+        --panel-2: #181a1d;
+        --line: #2a2d31;
+        --line-2: #3a3e44;
+        --text: #f3f4f6;
+        --muted: #9aa0a6;
+        --muted-2: #6b7280;
+        --ok: #d1d5db;
+        --err: #f3f4f6;
+        font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       }
+
       * {
         box-sizing: border-box;
       }
+
       body {
         margin: 0;
-        width: 100%;
-        min-width: 320px;
-        max-width: 100%;
-        padding: 0;
+        min-width: 340px;
+        max-width: 388px;
         background: var(--bg);
-        color: canvasText;
+        color: var(--text);
+        overflow-x: hidden;
       }
+
       main {
-        padding: 0;
         display: grid;
+        gap: 8px;
+        padding: 8px;
         width: 100%;
-        gap: 10px;
       }
+
       .panel {
-        background: var(--card);
-        border: 1px solid var(--border);
-        border-radius: 0;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: var(--panel);
         padding: 10px;
-        overflow-wrap: anywhere;
+        width: 100%;
+        overflow: hidden;
       }
-      h1 {
-        margin: 0 0 6px 0;
-        font-size: 14px;
-      }
-      h2 {
-        margin: 0 0 6px 0;
-        font-size: 12px;
-        text-transform: uppercase;
-        color: var(--muted);
-        letter-spacing: 0.05em;
-      }
-      .row {
+
+      .topbar {
         display: flex;
-        flex-wrap: wrap;
-        gap: 8px;
         align-items: center;
-        margin: 6px 0;
-      }
-      input:not([type='checkbox']),
-      select,
-      button {
-        border-radius: 0;
-        border: 1px solid var(--border);
-        background: color-mix(in oklab, canvas 95%, canvasText 5%);
-        color: canvasText;
-        padding: 8px 10px;
-        font: inherit;
-        min-width: 0;
-      }
-      select {
-        min-width: 102px;
-      }
-      button {
-        background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 76%, white 24%), var(--accent));
-        color: white;
-        cursor: pointer;
-        white-space: nowrap;
-      }
-      button.secondary {
-        background: color-mix(in oklab, canvas 92%, canvasText 8%);
-        color: canvasText;
-      }
-      .muted {
-        color: var(--muted);
-        font-size: 12px;
-      }
-      .status {
-        font-size: 12px;
-        min-height: 16px;
-      }
-      .status.ok {
-        color: #16a34a;
-      }
-      .status.err {
-        color: var(--danger);
-      }
-      .list {
-        font-size: 11px;
-        margin: 4px 0 0 0;
-        padding-left: 14px;
-      }
-      .list li {
-        margin: 4px 0;
-        word-break: break-word;
-      }
-      .connectionRow {
-        display: flex;
-        align-items: flex-start;
+        justify-content: space-between;
         gap: 8px;
-      }
-      .connectionText {
-        flex: 1;
-        min-width: 0;
-      }
-      .copyTabId {
-        font-size: 10px;
-        line-height: 1.2;
-        padding: 4px 8px;
-      }
-      .tiny {
-        font-size: 11px;
-        overflow-wrap: anywhere;
-        word-break: break-word;
-      }
-      .panel h2,
-      .panel .muted {
         margin-bottom: 8px;
       }
-      .meta {
-        display: block;
-        color: var(--muted);
-        font-size: 11px;
+
+      h1,
+      h2 {
+        margin: 0;
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: 0.01em;
       }
-      .small {
+
+      h2 {
         font-size: 11px;
         color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
       }
-      .toolbar {
+
+      .version {
+        font-size: 10px;
+        color: var(--muted-2);
+      }
+
+      .topbarRight {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .sectionHeaderButton {
+        width: 100%;
+        min-height: 0;
+        padding: 0;
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        color: inherit;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        cursor: pointer;
+        text-align: left;
+      }
+
+      .sectionHeaderButton::after {
+        content: '+';
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1;
+      }
+
+      .sectionHeaderButton[aria-expanded='true']::after {
+        content: '−';
+      }
+
+      .statusText {
+        min-width: 0;
+        font-size: 10px;
+        line-height: 1.35;
+        color: var(--muted-2);
+      }
+
+      .actionRow {
+        display: flex;
+        justify-content: flex-start;
+        margin: 12px 0 2px;
+      }
+
+      .row {
         display: grid;
         gap: 6px;
       }
-      .toggleRow {
-        display: flex;
-        align-items: flex-start;
-        gap: 8px;
-        margin-top: 8px;
+
+      .sectionBody[hidden] {
+        display: none;
       }
-      .toggleRow input[type='checkbox'] {
-        width: 14px;
-        height: 14px;
-        margin-top: 2px;
-        accent-color: var(--accent);
+
+      .fieldRow {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 6px;
+        align-items: end;
+        width: 100%;
       }
-      .toggleLabel {
-        display: block;
+
+      .buttonCluster {
+        display: inline-flex;
+        align-items: center;
+        justify-content: flex-start;
+        gap: 6px;
+        max-width: 100%;
+      }
+
+      label {
+        display: grid;
+        gap: 4px;
+        color: var(--muted);
+        font-size: 10px;
+        min-width: 0;
+      }
+
+      select,
+      button {
+        min-width: 0;
+        font: inherit;
+        border-radius: 10px;
+        border: 1px solid var(--line-2);
+      }
+
+      select {
+        width: 100%;
+        min-width: 0;
+        padding: 8px 10px;
+        color: var(--text);
+        background: #101113;
+      }
+
+      button {
+        min-height: 30px;
+        padding: 5px 8px;
+        color: var(--text);
+        background: #1d2024;
+        cursor: pointer;
+        font-size: 10px;
+        line-height: 1;
+      }
+
+      button.primary {
+        background: #2563eb;
+        color: #ffffff;
+        border-color: #2563eb;
+        font-weight: 600;
+      }
+
+      #attach {
+        min-width: 108px;
+      }
+
+      button:disabled {
+        opacity: 0.6;
+        cursor: default;
+      }
+
+      .toggle {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 6px;
+        align-items: center;
+        padding: 0;
+        margin-top: 10px;
+      }
+
+      .toggle input {
         margin: 0;
-        font-size: 12px;
-        line-height: 1.25;
       }
-      a {
-        color: color-mix(in oklab, var(--accent) 85%, canvasText 15%);
+
+      .toggleTitle {
         font-size: 11px;
-        text-decoration: none;
+        color: var(--text);
+        line-height: 1.2;
       }
-      a:hover {
-        text-decoration: underline;
+
+      .toolbar {
+        display: flex;
+        justify-content: flex-end;
+      }
+
+      .connectionsHeader {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 6px;
+      }
+
+      .connectionsMeta {
+        font-size: 10px;
+        color: var(--muted);
+      }
+
+      .list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: grid;
+        gap: 6px;
+      }
+
+      .emptyState,
+      .connectionCard {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel-2);
+        padding: 8px;
+      }
+
+      .emptyState {
+        color: var(--muted);
+        font-size: 10px;
+        line-height: 1.35;
+      }
+
+      .connectionTop,
+      .connectionMeta {
+        min-width: 0;
+      }
+
+      .connectionTop {
+        display: block;
+        margin-bottom: 4px;
+      }
+
+      .connectionMeta {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+      }
+
+      .connectionTitle {
+        min-width: 0;
+        flex: 1 1 auto;
+        font-size: 10px;
+        line-height: 1.35;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .connectionInfo {
+        min-width: 0;
+        flex: 1 1 auto;
+        color: var(--muted);
+        font-size: 10px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .copyTabId {
+        min-height: 26px;
+        padding: 4px 7px;
+        font-size: 9px;
+        flex: 0 0 auto;
+        min-width: 54px;
+        max-width: 54px;
+        align-self: center;
+        white-space: nowrap;
+      }
+
+      code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 10px;
+      }
+
+      @media (max-width: 360px) {
+        .fieldRow {
+          grid-template-columns: 1fr;
+        }
+
+        .connectionMeta {
+          grid-template-columns: 1fr auto;
+        }
       }
     </style>
   </head>
   <body>
     <main>
       <section class="panel">
-        <h1>Agent Browser Relay</h1>
-        <div id="activeTab" class="muted tiny"></div>
-        <div id="stateRow" class="muted tiny"></div>
-        <div class="row">
-          <span class="tiny">Relay:</span>
-          <span id="defaultPort" class="tiny"></span>
-          <span id="connectedPort" class="tiny"></span>
+        <div class="topbar">
+          <h1>Agent Browser Relay</h1>
+          <div class="topbarRight">
+            <button id="openExtensionTab" type="button">Open tab</button>
+            <div class="version">v0.0.11</div>
+          </div>
         </div>
-        <div class="row">
-          <label for="tabPort" class="muted">Relay port</label>
-          <select id="tabPort">
-            <option value="18792">18792 (default)</option>
-            <option value="18793">18793</option>
-            <option value="18893">18893</option>
-            <option value="9222">9222 (debug)</option>
-            <option value="3000">3000 (local)</option>
-          </select>
-          <button id="savePort" type="button">Apply</button>
-          <button id="clearPort" type="button" class="secondary">Clear</button>
+
+        <div id="status" class="statusText"></div>
+
+        <div class="actionRow">
+          <div class="buttonCluster">
+            <button id="attach" type="button" class="primary">Attach this tab</button>
+            <button id="refresh" type="button">Refresh</button>
+          </div>
         </div>
-        <div class="small">
-          Choose a relay port for this tab, then click <strong>Apply</strong>.
-        </div>
-        <div class="toggleRow">
+
+        <div class="toggle">
           <input id="allowCreateTarget" type="checkbox" />
-          <label for="allowCreateTarget" class="toggleLabel">
-            Allow agent to create new background tabs
-            <span class="meta">Controls CDP <code>Target.createTarget</code> requests, including the first agent-created tab (off by default).</span>
+          <label for="allowCreateTarget">
+            <span class="toggleTitle">Allow Agent to create new tabs</span>
           </label>
         </div>
-        <div class="row toolbar">
-          <button id="attach" type="button">Attach</button>
-          <button id="refresh" type="button" class="secondary">Refresh</button>
+      </section>
+
+      <section class="panel row">
+        <button
+          id="routingToggle"
+          type="button"
+          class="sectionHeaderButton"
+          aria-expanded="false"
+          aria-controls="routingBody"
+        >
+          <h2>Routing</h2>
+        </button>
+        <div id="routingBody" class="sectionBody" hidden>
+          <div class="fieldRow">
+            <label for="tabPort">
+              Relay port
+              <select id="tabPort">
+                <option value="18792">18792</option>
+                <option value="18793">18793</option>
+                <option value="18893">18893</option>
+                <option value="9222">9222</option>
+                <option value="3000">3000</option>
+              </select>
+            </label>
+            <div class="buttonCluster">
+              <button id="savePort" type="button">Apply</button>
+              <button id="clearPort" type="button">Clear</button>
+            </div>
+          </div>
         </div>
-        <div id="status" class="status"></div>
       </section>
 
       <section class="panel">
-        <h2>Connections</h2>
+        <div class="connectionsHeader">
+          <h2>Attached tabs</h2>
+          <div id="connectionsMeta" class="connectionsMeta">0 attached</div>
+        </div>
         <ul id="connectedList" class="list"></ul>
       </section>
-
     </main>
     <script src="popup.js"></script>
   </body>

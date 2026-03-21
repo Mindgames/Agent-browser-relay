@@ -202,8 +202,12 @@ function getRelaySource() {
       installPath: installBundle.path,
       loadPath: installBundle.path,
       loadPathKind: installBundle.pathKind,
+      installRootPath: installBundle.rootPath,
       sourcePath: installBundle.sourcePath,
       visiblePath: installBundle.visiblePath,
+      readActiveTabPath: installBundle.readActiveTabPath,
+      preflightPath: installBundle.preflightPath,
+      relayManagerPath: installBundle.relayManagerPath,
       installedVersion: installBundle.installedVersion,
       visibleVersion: installBundle.visibleVersion,
       sourceVersion: installBundle.sourceVersion,
@@ -1446,6 +1450,9 @@ function sanitizeStatusTab(value) {
     url: typeof value.url === 'string' ? value.url : null,
     title: typeof value.title === 'string' ? value.title : null,
     windowId: Number.isInteger(value.windowId) ? value.windowId : null,
+    leasedSessionId: typeof value.leasedSessionId === 'string' ? value.leasedSessionId : null,
+    port: parseStatusPort(value.port),
+    state: typeof value.state === 'string' ? value.state : null,
   }
 }
 
@@ -1490,6 +1497,70 @@ function summarizeRelayPorts(statusPayload) {
   return { ports, activePorts }
 }
 
+function findRelayPortStatus(snapshot, port = relayPort) {
+  return snapshot.ports.find((entry) => entry.port === port) || null
+}
+
+function findAttachedTabOnPort(portStatus, tabId) {
+  if (!portStatus || !Number.isInteger(tabId)) return null
+  return portStatus.attachedTabs.find((entry) => entry.tabId === tabId) || null
+}
+
+function findAttachedTabAcrossPorts(snapshot, tabId) {
+  if (!snapshot || !Number.isInteger(tabId)) return []
+  const matches = []
+  for (const entry of snapshot.ports) {
+    const tab = findAttachedTabOnPort(entry, tabId)
+    if (!tab) continue
+    matches.push({ port: entry.port, tab })
+  }
+  return matches
+}
+
+function describeStatusTab(tab) {
+  if (!tab) return 'unknown tab'
+  const parts = []
+  if (tab.title) parts.push(tab.title)
+  if (tab.url) parts.push(tab.url)
+  if (parts.length === 0) return `tab ${tab.tabId || 'unknown'}`
+  return parts.join(' ')
+}
+
+function formatAvailableTabIds(portStatus) {
+  if (!portStatus || !Array.isArray(portStatus.attachedTabs) || portStatus.attachedTabs.length === 0) return null
+  return portStatus.attachedTabs
+    .map((entry) => entry.tabId)
+    .filter(Number.isInteger)
+    .sort((a, b) => a - b)
+    .join(', ')
+}
+
+function createBlocker(code, summary, nextAction, options = {}) {
+  return {
+    code,
+    summary,
+    nextAction,
+    retryable: options.retryable !== false,
+    detail: options.detail || null,
+  }
+}
+
+function formatBlockerMessage(blocker) {
+  if (!blocker) return 'Relay readiness check failed.'
+  return [blocker.summary, blocker.nextAction].filter(Boolean).join(' ')
+}
+
+function buildBlockedCheckResult(relay, extension, blocker) {
+  extension.error = blocker.summary
+  return {
+    ok: false,
+    blocker,
+    relay,
+    extension,
+    source: getRelaySource(),
+  }
+}
+
 function buildPortMismatchHint(snapshot) {
   const mismatchPorts = snapshot.activePorts.filter((port) => port !== relayPort)
   if (mismatchPorts.length === 0) return null
@@ -1518,18 +1589,141 @@ function assertNoPortMismatch(snapshot) {
   )
 }
 
+function buildExtensionConnectionBlocker(snapshot) {
+  const mismatchHint = buildPortMismatchHint(snapshot)
+  if (mismatchHint) {
+    return createBlocker(
+      'PORT_MISMATCH',
+      `${mismatchHint}. This command is targeting relay port ${relayPort}.`,
+      `Re-run this command with --port "${snapshot.activePorts[0]}", or re-attach the target tab to relay port ${relayPort}.`,
+      { retryable: false },
+    )
+  }
+
+  return createBlocker(
+    'EXTENSION_NOT_CONNECTED',
+    `Relay is reachable at ${relayStatusUrl}, but the Chrome extension is not connected on port ${relayPort}.`,
+    'Open the Agent Browser Relay popup once so Chrome wakes the extension, then run `npm run extension:status -- --wait-for-connected --connected-timeout-ms 120000` and retry.',
+  )
+}
+
+function buildRequestedTabBlocker(snapshot, tabId) {
+  if (!Number.isInteger(tabId)) return null
+  const targetStatus = findRelayPortStatus(snapshot, relayPort)
+  const targetTab = findAttachedTabOnPort(targetStatus, tabId)
+  if (targetTab) {
+    if (targetTab.leasedSessionId && targetTab.leasedSessionId !== relaySessionId) {
+      return createBlocker(
+        'TAB_LEASED_BY_OTHER_SESSION',
+        `Tab ${tabId} is already leased by session ${targetTab.leasedSessionId} on relay port ${relayPort}.`,
+        'Choose another attached tab, or wait for the active controller session to release this lease before retrying.',
+        { retryable: false, detail: describeStatusTab(targetTab) },
+      )
+    }
+    return null
+  }
+
+  const attachedElsewhere = findAttachedTabAcrossPorts(snapshot, tabId).find((entry) => entry.port !== relayPort)
+  if (attachedElsewhere) {
+    return createBlocker(
+      'TAB_ATTACHED_ON_OTHER_PORT',
+      `Tab ${tabId} is attached on relay port ${attachedElsewhere.port}, not ${relayPort}.`,
+      `Re-run this command with --port "${attachedElsewhere.port}", or re-attach tab ${tabId} to relay port ${relayPort}.`,
+      { retryable: false, detail: describeStatusTab(attachedElsewhere.tab) },
+    )
+  }
+
+  const availableTabIds = formatAvailableTabIds(targetStatus)
+  const detail = availableTabIds ? `Attached tab ids on port ${relayPort}: ${availableTabIds}.` : null
+  return createBlocker(
+    'TAB_NOT_ATTACHED',
+    `Tab ${tabId} is not attached on relay port ${relayPort}.`,
+    `Focus tab ${tabId} in Chrome, open the Agent Browser Relay popup, click "Attach this tab", then retry.`,
+    { detail },
+  )
+}
+
+function mapCommandErrorToBlocker(error, snapshot, tabId) {
+  const rawMessage = error instanceof Error ? error.message : String(error || 'Relay check failed')
+  const message = rawMessage.toLowerCase()
+
+  if (message.includes('relay status check failed') || message.includes('relay not reachable')) {
+    return createBlocker(
+      'RELAY_UNREACHABLE',
+      `Relay is not reachable at ${relayStatusUrl}.`,
+      `Start the relay on ${relayHost}:${relayPort}, then retry this command.`,
+    )
+  }
+
+  if (message.includes('already leased by session')) {
+    return createBlocker(
+      'TAB_LEASED_BY_OTHER_SESSION',
+      rawMessage,
+      'Choose another attached tab, or wait for the active controller session to release this lease before retrying.',
+      { retryable: false },
+    )
+  }
+
+  if (Number.isInteger(tabId)) {
+    const requestedTabBlocker = snapshot ? buildRequestedTabBlocker(snapshot, tabId) : null
+    if (requestedTabBlocker) return requestedTabBlocker
+  }
+
+  if (message.includes('target.createtarget is disabled')) {
+    return createBlocker(
+      'TARGET_CREATE_DISABLED',
+      rawMessage,
+      'Enable "Allow agent to create new background tabs" in the extension popup, then retry.',
+      { retryable: false },
+    )
+  }
+
+  if (
+    message.includes('no response from relay bridge') ||
+    message.includes('no response from tab') ||
+    message.includes('relay ping timed out')
+  ) {
+    return createBlocker(
+      'BRIDGE_NO_RESPONSE',
+      Number.isInteger(tabId)
+        ? `Relay is connected, but tab ${tabId} is not responding through the bridge yet.`
+        : 'Relay is connected, but the active tab is not responding through the bridge yet.',
+      Number.isInteger(tabId)
+        ? `Keep tab ${tabId} attached in the popup and retry once the tab finishes loading.`
+        : 'Keep the target tab active and attached in the popup, then retry once the page finishes loading.',
+    )
+  }
+
+  return createBlocker(
+    'ATTACH_NOT_READY',
+    rawMessage,
+    Number.isInteger(tabId)
+      ? `Verify that tab ${tabId} is attached in the popup and still present in \`npm run relay:status -- --all --status-timeout-ms 3000\`, then retry.`
+      : 'Verify that the target tab is attached in the popup and retry.',
+  )
+}
+
 async function assertRelayConnectionReady() {
   const status = await getRelayStatus(false)
   if (!status.ok) {
-    throw new Error(`Relay status check failed: ${status.error || 'Relay not reachable'} at ${relayStatusUrl}`)
+    throw new Error(
+      formatBlockerMessage(
+        createBlocker(
+          'RELAY_UNREACHABLE',
+          `Relay is not reachable at ${relayStatusUrl}.`,
+          `Start the relay on ${relayHost}:${relayPort}, then retry this command.`,
+        ),
+      ),
+    )
   }
   const snapshot = summarizeRelayPorts(status)
-  const targetStatus = snapshot.ports.find((entry) => entry.port === relayPort) || null
+  const targetStatus = findRelayPortStatus(snapshot, relayPort)
   if (!targetStatus || !targetStatus.extensionConnected) {
-    assertNoPortMismatch(snapshot)
-    throw new Error(
-      `Relay is reachable (${relayStatusUrl}) but extension is not connected. Open the Agent Browser Relay popup once to confirm it is loaded, then click Attach this tab on the target tab.`,
-    )
+    throw new Error(formatBlockerMessage(buildExtensionConnectionBlocker(snapshot)))
+  }
+  const requestedTabBlocker = buildRequestedTabBlocker(snapshot, requestedTabId)
+  if (requestedTabBlocker) {
+    throw new Error(formatBlockerMessage(requestedTabBlocker))
   }
 }
 
@@ -1575,15 +1769,24 @@ async function checkBridge() {
     error: null,
   }
   const allowTablessTargetCreateCheck = requireTargetCreate && !Number.isInteger(requestedTabId)
+  let snapshot = null
 
   try {
     const status = await getRelayStatus(false)
     if (!status.ok) {
       relay.reachable = false
-      throw new Error(`Relay status check failed: ${status.error || 'not reachable'}`)
+      return buildBlockedCheckResult(
+        relay,
+        extension,
+        createBlocker(
+          'RELAY_UNREACHABLE',
+          `Relay is not reachable at ${relayStatusUrl}.`,
+          `Start the relay on ${relayHost}:${relayPort}, then retry this check.`,
+        ),
+      )
     }
-    const snapshot = summarizeRelayPorts(status)
-    const targetStatus = snapshot.ports.find((entry) => entry.port === relayPort) || null
+    snapshot = summarizeRelayPorts(status)
+    const targetStatus = findRelayPortStatus(snapshot, relayPort)
     relay.extensionConnected = Boolean(targetStatus ? targetStatus.extensionConnected : status.extensionConnected)
     relay.extensionLastSeenAgoMs = targetStatus?.extensionLastSeenAgoMs ?? null
     relay.queueDepth = Number.isFinite(Number(targetStatus?.queuedControllerCommands))
@@ -1598,37 +1801,38 @@ async function checkBridge() {
     relay.ports = snapshot.ports
 
     if (!relay.extensionConnected) {
-      const mismatchHint = buildPortMismatchHint(snapshot)
-      extension.error =
-        mismatchHint ||
-        'Extension is not connected to relay. Open the Agent Browser Relay popup once to confirm it is loaded, then click Attach this tab.'
-      return {
-        ok: false,
-        relay,
-        extension,
-        source: getRelaySource(),
-      }
+      return buildBlockedCheckResult(relay, extension, buildExtensionConnectionBlocker(snapshot))
+    }
+
+    const requestedTabBlocker = buildRequestedTabBlocker(snapshot, requestedTabId)
+    if (requestedTabBlocker) {
+      return buildBlockedCheckResult(relay, extension, requestedTabBlocker)
     }
 
     await sendRelayPing(timeoutMs)
     relay.ping = true
 
     if (requireTargetCreate && relay.targetCreateAllowed !== true) {
-      extension.error = relay.targetCreateAllowed === false
-        ? 'Target.createTarget is disabled. Enable "Allow agent to create new background tabs" in the extension popup.'
-        : 'Target.createTarget readiness is unknown from relay status. Refresh the extension and retry.'
-      return {
-        ok: false,
-        relay,
-        extension,
-        source: getRelaySource(),
-      }
+      const blocker = relay.targetCreateAllowed === false
+        ? createBlocker(
+            'TARGET_CREATE_DISABLED',
+            'Target.createTarget is disabled on this relay connection.',
+            'Enable "Allow agent to create new background tabs" in the extension popup, then retry.',
+            { retryable: false },
+          )
+        : createBlocker(
+            'TARGET_CREATE_UNKNOWN',
+            'Target.createTarget readiness is unknown from relay status.',
+            'Refresh the extension popup once so the relay receives fresh capability state, then retry.',
+          )
+      return buildBlockedCheckResult(relay, extension, blocker)
     }
 
     if (allowTablessTargetCreateCheck) {
       extension.connected = true
       return {
         ok: true,
+        blocker: null,
         relay,
         extension,
         source: getRelaySource(),
@@ -1663,34 +1867,33 @@ async function checkBridge() {
       }
       extension.connected = true
     } catch (ensureError) {
-      if (Number.isInteger(requestedTabId)) {
-        extension.error = ensureError instanceof Error ? ensureError.message : String(ensureError || 'Tab attachment failed')
-        return {
-          ok: false,
-          relay,
-          extension,
-          source: getRelaySource(),
+      if (!Number.isInteger(requestedTabId)) {
+        const pingResult = await sendRelayCommand('Runtime.evaluate', {
+          expression: '1 + 1',
+          returnByValue: true,
+        }).catch(() => null)
+
+        if (pingResult) {
+          extension.connected = true
+          return {
+            ok: true,
+            blocker: null,
+            relay,
+            extension,
+            source: getRelaySource(),
+          }
         }
       }
 
-      const pingResult = await sendRelayCommand('Runtime.evaluate', {
-        expression: '1 + 1',
-        returnByValue: true,
-      }).catch(() => null)
-
-      if (!pingResult) {
-        const fallbackMessage = ensureError instanceof Error ? ensureError.message : String(ensureError || 'No response from relay bridge')
-        extension.error = fallbackMessage
-      } else {
-        extension.connected = true
-      }
+      return buildBlockedCheckResult(relay, extension, mapCommandErrorToBlocker(ensureError, snapshot, requestedTabId))
     }
   } catch (error) {
-    extension.error = error instanceof Error ? error.message : String(error)
+    return buildBlockedCheckResult(relay, extension, mapCommandErrorToBlocker(error, snapshot, requestedTabId))
   }
 
   return {
     ok: relay.ping && extension.connected,
+    blocker: null,
     relay,
     extension,
     source: getRelaySource(),
@@ -1753,25 +1956,25 @@ async function waitForAttachmentReady(options = {}) {
   while (Date.now() - start < timeoutMs) {
     const status = await checkBridge()
     if (status.ok) return
-    if (
-      status.relay?.activePorts &&
-      Array.isArray(status.relay.activePorts) &&
-      !status.relay.activePorts.includes(relayPort) &&
-      status.relay.activePorts.length > 0
-    ) {
-      throw new Error(status.extension.error || 'Extension attached to different relay port')
+    if (status.blocker?.retryable === false) {
+      const blockerError = new Error(formatBlockerMessage(status.blocker))
+      blockerError.readinessState = status
+      throw blockerError
     }
     lastFailure = status
     await sleep(pollMs)
   }
 
-  throw new Error(
-    [
-      `Timed out waiting for active tab attachment (${timeoutMs}ms) at ${relayStatusUrl}.`,
-      'Keep the target tab active in Chrome and click the Agent Browser Relay icon to attach.',
-      ...(lastFailure ? [`Last observed check state: ${JSON.stringify(lastFailure)}`] : []),
-    ].join(' '),
-  )
+  const lastBlocker = lastFailure?.blocker
+  const timeoutError = new Error([
+    `Timed out waiting for relay readiness (${timeoutMs}ms) at ${relayStatusUrl}.`,
+    lastBlocker
+      ? formatBlockerMessage(lastBlocker)
+      : 'Keep the target tab active in Chrome, open the Agent Browser Relay popup, and confirm the target tab is attached before retrying.',
+    lastBlocker?.detail || '',
+  ].filter(Boolean).join(' '))
+  timeoutError.readinessState = lastFailure || null
+  throw timeoutError
 }
 
 async function main() {
@@ -1953,6 +2156,19 @@ async function main() {
     const output = pretty ? JSON.stringify(payload, null, 2) : JSON.stringify(payload)
     process.stdout.write(`${output}\n`)
   } catch (error) {
+    if (checkOnly && error && typeof error === 'object' && error.readinessState) {
+      const failureState = {
+        ...(error.readinessState || {}),
+        ok: false,
+        failure: {
+          message: error instanceof Error ? error.message : String(error),
+        },
+      }
+      const output = pretty ? JSON.stringify(failureState, null, 2) : JSON.stringify(failureState)
+      process.stdout.write(`${output}\n`)
+      process.exit(1)
+      return
+    }
     console.error(error instanceof Error ? error.message : String(error))
     process.exit(1)
   } finally {

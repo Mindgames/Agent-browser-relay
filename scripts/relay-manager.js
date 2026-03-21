@@ -42,6 +42,7 @@ const statusTimeoutMs = parsePositiveInt(
 const autoStopMs = parseNonNegativeInt(args.autoStopMs, DEFAULT_AUTO_STOP_MS, '--auto-stop-ms')
 
 const relayServerPath = path.join(REPO_ROOT, 'relay-server.js')
+const readActiveTabPath = path.join(REPO_ROOT, 'scripts', 'read-active-tab.js')
 const relayStatePath = getRelayStatePath(host, port)
 const relayLockPath = getRelayLockPath(host, port)
 
@@ -57,6 +58,10 @@ async function main() {
   }
   if (command === 'status') {
     await printStatus()
+    return
+  }
+  if (command === 'doctor') {
+    await runDoctor()
     return
   }
   if (command === 'stop') {
@@ -239,6 +244,63 @@ async function printStatus() {
       Number.isInteger(state?.autoStopAt) && state.autoStopAt > Date.now() ? state.autoStopAt - Date.now() : null,
   }
   console.log(JSON.stringify(payload, null, 2))
+}
+
+async function runDoctor() {
+  const childArgs = [
+    readActiveTabPath,
+    '--check',
+    '--wait-for-attach',
+    '--host',
+    host,
+    '--port',
+    String(port),
+    '--status-timeout-ms',
+    String(statusTimeoutMs),
+    '--attach-timeout-ms',
+    String(
+      parseNonNegativeInt(
+        args.attachTimeoutMs,
+        DEFAULT_TIMEOUT_MS * 10,
+        '--attach-timeout-ms',
+      ),
+    ),
+    '--attach-poll-ms',
+    String(parsePositiveInt(args.attachPollMs, DEFAULT_START_POLL_MS * 2, '--attach-poll-ms')),
+  ]
+
+  if (args.tabId !== undefined) {
+    childArgs.push('--tab-id', String(parsePositiveInt(args.tabId, 1, '--tab-id')))
+  }
+  if (args.requireTargetCreate === true) {
+    childArgs.push('--require-target-create')
+  }
+  if (args.pretty === false) {
+    childArgs.push('--pretty', 'false')
+  }
+
+  await new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, childArgs, {
+      cwd: REPO_ROOT,
+      stdio: 'inherit',
+    })
+
+    child.on('error', (error) => {
+      reject(error instanceof Error ? error : new Error(String(error)))
+    })
+    child.on('exit', (code, signal) => {
+      if (signal) {
+        reject(new Error(`Relay doctor terminated by signal ${signal}`))
+        return
+      }
+      if (code === 0 || code === 1) {
+        process.exitCode = code
+        resolve()
+        return
+      }
+      reject(new Error(`Relay doctor failed with exit code ${code ?? 'unknown'}`))
+    })
+  })
 }
 
 async function printExtensionConnectionGuidance() {
@@ -551,11 +613,16 @@ function parseArgs(argv) {
     else if (arg === '--host' && argv[i + 1]) out.host = argv[++i]
     else if (arg === '--port' && argv[i + 1]) out.port = argv[++i]
     else if (arg === '--ports' && argv[i + 1]) out.ports = argv[++i]
+    else if (arg === '--tab-id' && argv[i + 1]) out.tabId = argv[++i]
     else if (arg === '--timeout' && argv[i + 1]) out.timeout = argv[++i]
     else if (arg === '--start-timeout-ms' && argv[i + 1]) out.startTimeoutMs = argv[++i]
     else if (arg === '--action' && argv[i + 1]) out.action = argv[++i]
     else if (arg === '--status-timeout-ms' && argv[i + 1]) out.statusTimeoutMs = argv[++i]
+    else if (arg === '--attach-timeout-ms' && argv[i + 1]) out.attachTimeoutMs = argv[++i]
+    else if (arg === '--attach-poll-ms' && argv[i + 1]) out.attachPollMs = argv[++i]
     else if (arg === '--auto-stop-ms' && argv[i + 1]) out.autoStopMs = argv[++i]
+    else if (arg === '--require-target-create') out.requireTargetCreate = true
+    else if (arg === '--json') out.pretty = false
     else if (arg === '--all') out.all = true
   }
 
@@ -568,6 +635,7 @@ function printUsage() {
   Override with --host / --port / --ports when needed.
   node scripts/relay-manager.js start [--host ${DEFAULT_HOST}] [--port ${DEFAULT_PORT}] [--ports ${DEFAULT_PORT},18794] [--timeout 12000] [--status-timeout-ms 1200] [--start-timeout-ms 10000] [--auto-stop-ms 0]
   node scripts/relay-manager.js status [--host ${DEFAULT_HOST}] [--port ${DEFAULT_PORT}] [--ports ${DEFAULT_PORT},18794] [--status-timeout-ms 1200] [--all]
+  node scripts/relay-manager.js doctor [--host ${DEFAULT_HOST}] [--port ${DEFAULT_PORT}] [--tab-id 123] [--require-target-create] [--status-timeout-ms 1200] [--attach-timeout-ms 120000] [--json]
   node scripts/relay-manager.js ports [--host ${DEFAULT_HOST}] --action add|remove --ports ${DEFAULT_PORT},18794 [--status-timeout-ms 1200]
   node scripts/relay-manager.js stop [--host ${DEFAULT_HOST}] [--port ${DEFAULT_PORT}] [--status-timeout-ms 1200]
 `)

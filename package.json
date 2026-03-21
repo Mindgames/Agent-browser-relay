@@ -1,7 +1,7 @@
 {
   "name": "agent-browser-relay",
   "private": true,
-  "version": "0.0.10",
+  "version": "0.0.11",
   "bin": {
     "agent-browser-relay": "relay-server.js"
   },
@@ -17,6 +17,7 @@
     "start:relay": "node relay-server.js",
     "relay:start": "node scripts/relay-manager.js start",
     "relay:status": "node scripts/relay-manager.js status",
+    "relay:doctor": "node scripts/relay-manager.js doctor",
     "relay:stop": "node scripts/relay-manager.js stop",
     "relay:service:install": "node scripts/relay-service.js install",
     "relay:service:uninstall": "node scripts/relay-service.js uninstall",
