@@ -179,6 +179,7 @@ let cachedExpression = null
 
 function getRelaySource() {
   const observedExtensionVersion = getObservedExtensionVersion()
+  const observedBrowser = getObservedBrowserIdentity()
   const expectedExtensionVersion = installBundle.sourceVersion || installBundle.relayVersion || installBundle.installedVersion || null
   const extensionMismatch =
     typeof observedExtensionVersion === 'string' && typeof expectedExtensionVersion === 'string'
@@ -192,6 +193,7 @@ function getRelaySource() {
     relaySessionId,
     tabId: Number.isInteger(leasedTabId) ? leasedTabId : null,
     capabilities: SKILL_CAPABILITIES,
+    browser: observedBrowser,
     extension: {
       installPath: installBundle.path,
       loadPath: installBundle.path,
@@ -230,6 +232,20 @@ function getObservedExtensionVersion() {
     if (!entry || typeof entry !== 'object') continue
     if (Number(entry.port) !== relayPort) continue
     if (typeof entry.extensionVersion === 'string') return entry.extensionVersion
+  }
+  return null
+}
+
+function getObservedBrowserIdentity() {
+  if (!relayStatusSnapshot || typeof relayStatusSnapshot !== 'object') return null
+  if (relayStatusSnapshot.browser && typeof relayStatusSnapshot.browser === 'object') {
+    return sanitizeBrowserIdentity(relayStatusSnapshot.browser)
+  }
+  if (!Array.isArray(relayStatusSnapshot.ports)) return null
+  for (const entry of relayStatusSnapshot.ports) {
+    if (!entry || typeof entry !== 'object') continue
+    if (Number(entry.port) !== relayPort) continue
+    return sanitizeBrowserIdentity(entry.browser)
   }
   return null
 }
@@ -1581,6 +1597,16 @@ function sanitizeStatusLease(value) {
   }
 }
 
+function sanitizeBrowserIdentity(value) {
+  if (!value || typeof value !== 'object') return null
+  const name = typeof value.name === 'string' && value.name.trim() ? value.name.trim() : null
+  const family = typeof value.family === 'string' && value.family.trim() ? value.family.trim() : null
+  const version = typeof value.version === 'string' && value.version.trim() ? value.version.trim() : null
+  const profileId = typeof value.profileId === 'string' && value.profileId.trim() ? value.profileId.trim() : null
+  if (!name && !family && !version && !profileId) return null
+  return { name, family, version, profileId }
+}
+
 function summarizeRelayPorts(statusPayload) {
   const rawPorts = Array.isArray(statusPayload?.ports)
     ? statusPayload.ports
@@ -1598,6 +1624,7 @@ function summarizeRelayPorts(statusPayload) {
           tabLeases: statusPayload?.tabLeases,
           staleTabLeases: statusPayload?.staleTabLeases,
           allowTargetCreate: statusPayload?.allowTargetCreate,
+          browser: statusPayload?.browser,
         },
       ]
 
@@ -1628,6 +1655,7 @@ function summarizeRelayPorts(statusPayload) {
       staleTabLeases: Array.isArray(raw.staleTabLeases)
         ? raw.staleTabLeases.map(sanitizeStatusLease).filter(Boolean)
         : [],
+      browser: sanitizeBrowserIdentity(raw.browser),
       extensionVersion: typeof raw.extensionVersion === 'string' ? raw.extensionVersion : null,
       extensionName: typeof raw.extensionName === 'string' ? raw.extensionName : null,
       extensionCapabilities:

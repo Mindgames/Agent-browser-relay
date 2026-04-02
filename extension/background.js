@@ -12,6 +12,7 @@ const DEBUG_LOG = true
 const ALLOW_FOREGROUND_ACTIVATE_TARGET = false
 const RELAY_PORT_BY_TAB_KEY = 'relayPortByTab'
 const ALLOW_TARGET_CREATE_KEY = 'allowTargetCreate'
+const BROWSER_PROFILE_ID_KEY = 'browserProfileId'
 const EXTENSION_CAPABILITIES = Object.freeze({
   bridgeMethods: [
     'Grais.debugger.ensureActiveTab',
@@ -72,6 +73,7 @@ let preferenceStateLoadPromise = null
 let nextSession = 1
 let currentRelayPort = DEFAULT_PORT
 let suppressRelayReconnectForPortSwitch = false
+let browserIdentityPromise = null
 
 /** @type {Map<number, {state:'connecting'|'connected', sessionId?:string, targetId?:string, attachOrder?:number}>} */
 const tabs = new Map()
@@ -173,6 +175,107 @@ async function setPinnedTabPref(tabId) {
 async function getAllowTargetCreatePref() {
   const stored = await chrome.storage.local.get([ALLOW_TARGET_CREATE_KEY])
   return stored[ALLOW_TARGET_CREATE_KEY] === true
+}
+
+function isNonEmptyString(value) {
+  return typeof value === 'string' && value.trim().length > 0
+}
+
+function generateBrowserProfileId() {
+  try {
+    if (globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function') {
+      return globalThis.crypto.randomUUID()
+    }
+  } catch {
+    // ignore
+  }
+  return `profile-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+async function getOrCreateBrowserProfileId() {
+  const stored = await chrome.storage.local.get([BROWSER_PROFILE_ID_KEY])
+  const existing = stored[BROWSER_PROFILE_ID_KEY]
+  if (isNonEmptyString(existing)) return existing.trim()
+  const nextProfileId = generateBrowserProfileId()
+  await chrome.storage.local.set({ [BROWSER_PROFILE_ID_KEY]: nextProfileId })
+  return nextProfileId
+}
+
+function extractBrowserVersion(userAgent, patterns) {
+  for (const pattern of patterns) {
+    const match = userAgent.match(pattern)
+    if (match && isNonEmptyString(match[1])) {
+      return match[1].trim()
+    }
+  }
+  return null
+}
+
+async function detectBrowserIdentity() {
+  const userAgent = typeof navigator?.userAgent === 'string' ? navigator.userAgent : ''
+  const profileId = await getOrCreateBrowserProfileId()
+
+  if (!userAgent) {
+    return {
+      family: null,
+      name: 'Unknown',
+      version: null,
+      profileId,
+    }
+  }
+
+  const isBrave = Boolean(
+    navigator?.brave
+    && typeof navigator.brave.isBrave === 'function'
+    && await navigator.brave.isBrave().catch(() => false),
+  )
+
+  if (isBrave) {
+    return {
+      family: 'chromium',
+      name: 'Brave',
+      version: extractBrowserVersion(userAgent, [/Chrome\/([\d.]+)/, /Brave\/([\d.]+)/]),
+      profileId,
+    }
+  }
+
+  const candidates = [
+    { family: 'chromium', name: 'Microsoft Edge', patterns: [/Edg\/([\d.]+)/] },
+    { family: 'chromium', name: 'Opera', patterns: [/OPR\/([\d.]+)/] },
+    { family: 'chromium', name: 'Vivaldi', patterns: [/Vivaldi\/([\d.]+)/] },
+    { family: 'chromium', name: 'Chromium', patterns: [/Chromium\/([\d.]+)/] },
+    { family: 'chromium', name: 'Chrome', patterns: [/Chrome\/([\d.]+)/] },
+    { family: 'gecko', name: 'Firefox', patterns: [/Firefox\/([\d.]+)/] },
+    { family: 'webkit', name: 'Safari', patterns: [/Version\/([\d.]+)/, /Safari\/([\d.]+)/] },
+  ]
+
+  for (const candidate of candidates) {
+    const version = extractBrowserVersion(userAgent, candidate.patterns)
+    if (!version) continue
+    return {
+      family: candidate.family,
+      name: candidate.name,
+      version,
+      profileId,
+    }
+  }
+
+  return {
+    family: null,
+    name: 'Unknown',
+    version: null,
+    profileId,
+  }
+}
+
+async function getBrowserIdentity() {
+  if (!browserIdentityPromise) {
+    browserIdentityPromise = detectBrowserIdentity().catch((error) => {
+      browserIdentityPromise = null
+      throw error
+    })
+  }
+  return browserIdentityPromise
 }
 
 async function setAllowTargetCreatePref(enabled) {
@@ -598,6 +701,7 @@ async function sendRelayHeartbeat() {
   const activeTab = await buildActiveHeartbeatTab()
   const attachedTabs = await buildAttachedHeartbeatTabs()
   const manifest = typeof chrome?.runtime?.getManifest === 'function' ? chrome.runtime.getManifest() : null
+  const browser = await getBrowserIdentity().catch(() => null)
   refreshTabIndicator(activeTab?.tabId)
   const payload = {
     method: 'Grais.extensionHeartbeat',
@@ -611,6 +715,7 @@ async function sendRelayHeartbeat() {
     extensionVersion: manifest && typeof manifest.version === 'string' ? manifest.version : null,
     extensionName: manifest && typeof manifest.name === 'string' ? manifest.name : null,
     extensionCapabilities: EXTENSION_CAPABILITIES,
+    browser,
   }
   sendToRelay(payload)
 }

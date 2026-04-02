@@ -2,6 +2,8 @@
 
 Agent Browser Relay lets your agent control and read from tabs in your real Chrome session, including multiple attached tabs in parallel, without forcing a separate browser profile.
 
+Chrome remains the documented target. Chromium-based browsers that can load the extension may also work, and relay status now reports the detected host browser and profile id, but that is visibility support rather than a guaranteed cross-browser orchestration feature.
+
 ## Why Use It
 
 - Run agent reads on multiple attached tabs concurrently with per-tab lease scoping (`--tab-id`) inside one shared extension instance.
@@ -19,6 +21,7 @@ Agent Browser Relay lets your agent control and read from tabs in your real Chro
 - Scriptable read/check interface (`node scripts/read-active-tab.js`) for agent workflows.
 - One-command readiness preflight via `npm run relay:doctor`.
 - Explicit tab leasing model for multi-agent safety on shared relay infrastructure.
+- Detected host-browser identity in relay status so you can distinguish Chrome, Edge, Brave-style hosts and separate browser profiles.
 
 ## Concurrency Model
 
@@ -30,6 +33,13 @@ Agent Browser Relay lets your agent control and read from tabs in your real Chro
   - `tabLeases`
   - `leaseSummary.availableAttachedTabIds`
 - If a tab is already leased, the supported recovery path is to wait for that session to finish, or choose another attached tab without an active lease. Do not force takeover.
+
+## Browser Support
+
+- Documented target: Google Chrome.
+- Possible but not guaranteed: Chromium-based browsers that can load this extension in developer mode.
+- Not implemented as a first-class feature: browser selection, browser-specific routing, or a guarantee that one relay setup can orchestrate multiple different browsers as separate managed backends.
+- Shipped in `v0.0.12`: relay status now reports the detected host browser and a persistent browser-profile id so operators can tell which browser/profile is actually connected.
 
 ## Quick Start (Human Setup)
 
@@ -108,6 +118,8 @@ This is a fallback only. The primary install path is still the one from your glo
 ```bash
 npm run extension:status -- --port "18793" --wait-for-connected --connected-timeout-ms 120000
 ```
+
+When connected, this command now also prints the detected browser host and profile id for that relay port.
 
 ### 5) Attach tabs and allow broader tab control
 
@@ -329,6 +341,7 @@ node scripts/read-active-tab.js --tab-id "<TAB_ID>" --preset whatsapp-messages -
 - Tabs without a saved mapping use the relay default port (`18793`).
 - After successful attach, tab-to-port mapping is stored and reused.
 - Closing a tab clears its mapping.
+- Multi-port routing helps separate attached-tab workflows. It is not the same thing as first-class multi-browser support.
 
 Inspect all ports/tabs:
 

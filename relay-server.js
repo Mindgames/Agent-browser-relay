@@ -162,6 +162,7 @@ function summarizePortState(state) {
     lastHeartbeatTs: state.extensionHeartbeatState?.ts || null,
     extensionVersion: state.extensionHeartbeatState?.extensionVersion || null,
     extensionName: state.extensionHeartbeatState?.extensionName || null,
+    browser: sanitizeBrowserIdentity(state.extensionHeartbeatState?.browser),
     extensionCapabilities:
       state.extensionHeartbeatState?.extensionCapabilities && typeof state.extensionHeartbeatState.extensionCapabilities === 'object'
         ? state.extensionHeartbeatState.extensionCapabilities
@@ -197,6 +198,7 @@ function getSinglePortStatus(state) {
     staleTabLeases: leaseState.staleTabLeases,
     extensionVersion: state.extensionHeartbeatState?.extensionVersion || null,
     extensionName: state.extensionHeartbeatState?.extensionName || null,
+    browser: sanitizeBrowserIdentity(state.extensionHeartbeatState?.browser),
     extensionCapabilities:
       state.extensionHeartbeatState?.extensionCapabilities && typeof state.extensionHeartbeatState.extensionCapabilities === 'object'
         ? state.extensionHeartbeatState.extensionCapabilities
@@ -730,6 +732,7 @@ function onExtensionMessage(msg, socket, state) {
       allowTargetCreate: typeof msg.allowTargetCreate === 'boolean' ? msg.allowTargetCreate : null,
       extensionVersion: typeof msg.extensionVersion === 'string' ? msg.extensionVersion : null,
       extensionName: typeof msg.extensionName === 'string' ? msg.extensionName : null,
+      browser: sanitizeBrowserIdentity(msg.browser),
       extensionCapabilities:
         msg.extensionCapabilities && typeof msg.extensionCapabilities === 'object' ? msg.extensionCapabilities : null,
     }
@@ -793,6 +796,21 @@ function onExtensionMessage(msg, socket, state) {
 
   if (msg && msg.method === 'pong') {
     return
+  }
+}
+
+function sanitizeBrowserIdentity(value) {
+  if (!value || typeof value !== 'object') return null
+  const name = typeof value.name === 'string' ? value.name.trim() : ''
+  const family = typeof value.family === 'string' ? value.family.trim() : ''
+  const version = typeof value.version === 'string' ? value.version.trim() : ''
+  const profileId = typeof value.profileId === 'string' ? value.profileId.trim() : ''
+  if (!name && !family && !version && !profileId) return null
+  return {
+    name: name || null,
+    family: family || null,
+    version: version || null,
+    profileId: profileId || null,
   }
 }
 
