@@ -272,12 +272,23 @@ function normalizeStatusPorts(status) {
       lastHeartbeatTs: status.lastHeartbeatTs,
       extensionVersion: status.extensionVersion,
       extensionName: status.extensionName,
+      browser: status.browser,
       extensionCapabilities: status.extensionCapabilities,
       allowTargetCreate: status.allowTargetCreate,
     })]
   }
 
   return []
+}
+
+function formatBrowserIdentity(value) {
+  if (!value || typeof value !== 'object') return null
+  const name = typeof value.name === 'string' && value.name.trim() ? value.name.trim() : null
+  const version = typeof value.version === 'string' && value.version.trim() ? value.version.trim() : null
+  const profileId = typeof value.profileId === 'string' && value.profileId.trim() ? value.profileId.trim() : null
+  const label = [name, version].filter(Boolean).join(' ')
+  if (profileId) return label ? `${label} (profile ${profileId})` : `profile ${profileId}`
+  return label || null
 }
 
 function enrichPortLeaseSummary(entry) {
@@ -376,7 +387,12 @@ async function printExtensionConnectionGuidance() {
   const targetPorts = Array.isArray(status.ports) ? status.ports : []
   const target = targetPorts.find((entry) => Number(entry?.port) === port) || null
   if (target?.extensionConnected === true) {
-    console.log(`[agent-browser-relay] Chrome extension is connected on relay port ${port}.`)
+    const browserLabel = formatBrowserIdentity(target.browser)
+    console.log(
+      browserLabel
+        ? `[agent-browser-relay] Extension is connected on relay port ${port} via ${browserLabel}.`
+        : `[agent-browser-relay] Chrome extension is connected on relay port ${port}.`,
+    )
     return
   }
 

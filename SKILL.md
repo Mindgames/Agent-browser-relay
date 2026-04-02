@@ -7,6 +7,8 @@ description: Read metadata and DOM payloads from an attached Chrome tab through 
 
 Use this skill to attach to a chosen Chrome tab through the bundled Agent Browser Relay extension and extract tab metadata or DOM data for analysis.
 
+Chrome is the documented target. Chromium-based browsers that can load the extension may also work, and relay status now surfaces detected host-browser identity plus a persistent profile id, but the skill does not yet provide first-class multi-browser orchestration.
+
 ## Quick start
 
 Fresh-machine rule:
@@ -63,6 +65,8 @@ Override per command with `--host`, `--port`, and `--attach-timeout-ms` when nee
    npm run extension:status -- --port "18793" --wait-for-connected --connected-timeout-ms 120000
    ```
 
+   This now also reports the detected browser host and persistent profile id for the connected extension instance.
+
 4. Attach the extension to the target tab (open toolbar popup and click attach)
 
    Optional per-tab relay: in the popup, set **Tab port** before clicking attach if this tab should use a non-default relay port.
@@ -100,6 +104,7 @@ Override per command with `--host`, `--port`, and `--attach-timeout-ms` when nee
 - A tab with no saved relay-port mapping uses the global default relay port (`18793`).
 - After a successful attach, the extension saves that tab’s mapped relay port and reuses it automatically.
 - Closed tabs have their mapping removed automatically.
+- This is per-tab port routing, not first-class multi-browser support.
 
 
 ## Mandatory behavior for agents

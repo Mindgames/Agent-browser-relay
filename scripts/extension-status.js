@@ -60,6 +60,7 @@ async function main() {
     extensionLastSeenAgoMs: status.extensionLastSeenAgoMs,
     extensionVersion: status.extensionVersion,
     extensionName: status.extensionName,
+    browser: status.browser,
     primaryExtensionPath: installBundle.path,
     primaryPathKind: installBundle.pathKind,
     visibleExtensionPath: installBundle.visiblePath,
@@ -104,6 +105,25 @@ async function waitForExtensionConnection() {
   }
 }
 
+function sanitizeBrowserIdentity(value) {
+  if (!value || typeof value !== 'object') return null
+  const name = typeof value.name === 'string' && value.name.trim() ? value.name.trim() : null
+  const family = typeof value.family === 'string' && value.family.trim() ? value.family.trim() : null
+  const version = typeof value.version === 'string' && value.version.trim() ? value.version.trim() : null
+  const profileId = typeof value.profileId === 'string' && value.profileId.trim() ? value.profileId.trim() : null
+  if (!name && !family && !version && !profileId) return null
+  return { name, family, version, profileId }
+}
+
+function formatBrowserIdentity(browser) {
+  if (!browser) return null
+  const label = [browser.name, browser.version].filter(Boolean).join(' ')
+  if (browser.profileId) {
+    return label ? `${label} (profile ${browser.profileId})` : `profile ${browser.profileId}`
+  }
+  return label || null
+}
+
 async function getExtensionConnectionStatus() {
   try {
     const response = await requestJson(relayStatusUrl, statusTimeoutMs)
@@ -125,6 +145,7 @@ async function getExtensionConnectionStatus() {
         : null,
       extensionVersion: typeof targetPort?.extensionVersion === 'string' ? targetPort.extensionVersion : null,
       extensionName: typeof targetPort?.extensionName === 'string' ? targetPort.extensionName : null,
+      browser: sanitizeBrowserIdentity(targetPort?.browser),
       error: null,
     }
   } catch (error) {
@@ -136,6 +157,7 @@ async function getExtensionConnectionStatus() {
       extensionLastSeenAgoMs: null,
       extensionVersion: null,
       extensionName: null,
+      browser: null,
       error: `Relay is not reachable at ${relayStatusUrl}: ${error instanceof Error ? error.message : String(error)}`,
     }
   }
@@ -155,12 +177,20 @@ function printSummary(payload) {
   }
 
   if (payload.extensionConnected) {
-    console.log(`Relay status: Chrome extension connected on port ${payload.port}`)
+    const browserLabel = formatBrowserIdentity(payload.browser)
+    console.log(
+      browserLabel
+        ? `Relay status: extension connected on port ${payload.port} via ${browserLabel}`
+        : `Relay status: Chrome extension connected on port ${payload.port}`,
+    )
     if (payload.extensionLastSeenAgoMs !== null) {
       console.log(`Last heartbeat: ${payload.extensionLastSeenAgoMs}ms ago`)
     }
     if (payload.extensionVersion) {
       console.log(`Extension version: ${payload.extensionVersion}`)
+    }
+    if (payload.browser?.family) {
+      console.log(`Browser family: ${payload.browser.family}`)
     }
     return
   }
