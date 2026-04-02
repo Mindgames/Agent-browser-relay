@@ -1,11 +1,11 @@
 ---
 name: agent-browser-relay
-description: Read metadata and DOM payloads from an attached Chrome tab through a local Agent Browser Relay extension.
+description: Read metadata, DOM, screenshots, and structured page payloads from an attached Chrome or Chromium tab through the local Agent Browser Relay extension. Use when Codex needs relay preflight or troubleshooting, popup attach guidance, lease-scoped concurrent tab reads, or new background tab creation through the relay without direct browser automation.
 ---
 
 # Agent Browser Relay
 
-Use this skill to attach to a chosen Chrome tab through the bundled Agent Browser Relay extension and extract tab metadata or DOM data for analysis.
+Use this skill to operate through the local relay gateway on an explicitly attached browser tab, verify readiness before reads, and keep concurrent tab workflows lease-scoped instead of falling back to direct browser-control tools.
 
 Chrome is the documented target. Chromium-based browsers that can load the extension may also work, and relay status now surfaces detected host-browser identity plus a persistent profile id, but the skill does not yet provide first-class multi-browser orchestration.
 
