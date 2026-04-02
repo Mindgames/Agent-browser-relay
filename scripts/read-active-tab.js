@@ -2208,6 +2208,10 @@ async function main() {
     }
 
     if (metadataOnly) {
+      if (waitForAttach && attachTimeoutMs > 0) {
+        await waitForAttachmentReady({ timeoutMs: attachTimeoutMs, pollMs: attachPollMs })
+      }
+
       await ensureMetadataReadyForCommand()
 
       const metadata = await sendRelayCommand('Grais.debugger.getActiveTabMetadata')
