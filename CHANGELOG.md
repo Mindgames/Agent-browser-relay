@@ -4,7 +4,9 @@ All notable changes to Agent Browser Relay are tracked here.
 
 ## [Unreleased]
 
-- No unreleased entries yet.
+### Changed
+
+- Refreshed the extension icon set with a simpler dark monogram mark that matches the popup and options page styling more closely.
 
 ## [0.0.12] - 2026-04-02
 
