@@ -1719,6 +1719,7 @@ function buildRequestedTabBlocker(snapshot, tabId) {
 function mapCommandErrorToBlocker(error, snapshot, tabId) {
   const rawMessage = error instanceof Error ? error.message : String(error || 'Relay check failed')
   const message = rawMessage.toLowerCase()
+  const requestedTabBlocker = Number.isInteger(tabId) && snapshot ? buildRequestedTabBlocker(snapshot, tabId) : null
 
   if (message.includes('relay status check failed') || message.includes('relay not reachable')) {
     return createBlocker(
@@ -1726,6 +1727,10 @@ function mapCommandErrorToBlocker(error, snapshot, tabId) {
       `Relay is not reachable at ${relayStatusUrl}.`,
       `Start the relay on ${relayHost}:${relayPort}, then retry this command.`,
     )
+  }
+
+  if (requestedTabBlocker?.code === 'TAB_LEASED_BY_OTHER_SESSION') {
+    return requestedTabBlocker
   }
 
   if (message.includes('already leased by session')) {
@@ -1737,10 +1742,7 @@ function mapCommandErrorToBlocker(error, snapshot, tabId) {
     )
   }
 
-  if (Number.isInteger(tabId)) {
-    const requestedTabBlocker = snapshot ? buildRequestedTabBlocker(snapshot, tabId) : null
-    if (requestedTabBlocker) return requestedTabBlocker
-  }
+  if (requestedTabBlocker) return requestedTabBlocker
 
   if (message.includes('target.createtarget is disabled')) {
     return createBlocker(
