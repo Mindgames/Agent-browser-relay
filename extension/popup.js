@@ -55,6 +55,9 @@ function compactTabMeta(item, defaultPort) {
   const parts = []
   if (Number.isInteger(item?.tabId)) parts.push(`Tab ${item.tabId}`)
   parts.push(`Relay ${Number.isInteger(item?.port) ? item.port : defaultPort}`)
+  if (item?.leasedSessionId) {
+    parts.push(`Leased by ${truncateText(item.leasedSessionId, 18)}`)
+  }
   const urlLabel = compactUrlLabel(item?.url)
   if (urlLabel) parts.push(urlLabel)
   return parts.join(' • ')
@@ -114,7 +117,13 @@ function renderConnectedTabs(state) {
 
   const entries = Array.isArray(state.connectedTabs) ? state.connectedTabs : []
   if (connectionsMetaEl) {
-    connectionsMetaEl.textContent = `${entries.length} attached`
+    const leaseCount = Number.isFinite(Number(state.attachedLeaseCount)) ? Number(state.attachedLeaseCount) : 0
+    const staleLeaseCount = Number.isFinite(Number(state.staleLeaseCount)) ? Number(state.staleLeaseCount) : 0
+    const suffix = [
+      leaseCount > 0 ? `${leaseCount} leased` : null,
+      staleLeaseCount > 0 ? `${staleLeaseCount} stale` : null,
+    ].filter(Boolean).join(' • ')
+    connectionsMetaEl.textContent = suffix ? `${entries.length} attached • ${suffix}` : `${entries.length} attached`
   }
 
   if (!entries.length) {

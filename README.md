@@ -4,7 +4,7 @@ Agent Browser Relay lets your agent control and read from tabs in your real Chro
 
 ## Why Use It
 
-- Run agent reads on multiple attached tabs concurrently with per-tab lease isolation (`--tab-id`).
+- Run agent reads on multiple attached tabs concurrently with per-tab lease scoping (`--tab-id`) inside one shared extension instance.
 - Execute on background/non-focused tabs while you continue using your browser.
 - Keep your real logged-in session (cookies, auth state, extensions) instead of re-automating login in a disposable browser.
 - Extract structured page data, full DOM, screenshots, and chat/message presets via one CLI.
@@ -18,6 +18,17 @@ Agent Browser Relay lets your agent control and read from tabs in your real Chro
 - Scriptable read/check interface (`node scripts/read-active-tab.js`) for agent workflows.
 - One-command readiness preflight via `npm run relay:doctor`.
 - Explicit tab leasing model for multi-agent safety on shared relay infrastructure.
+
+## Concurrency Model
+
+- Multiple tabs can be attached at the same time.
+- A given attached tab can only be actively leased by one relay session at a time.
+- `--tab-id` scopes an agent run to one attached tab lease. It does not create a private browser or extension instance.
+- Use `npm run relay:status -- --all --status-timeout-ms 3000` to inspect:
+  - `attachedTabs[].leasedSessionId`
+  - `tabLeases`
+  - `leaseSummary.availableAttachedTabIds`
+- If a tab is already leased, the supported recovery path is to wait for that session to finish, or choose another attached tab without an active lease. Do not force takeover.
 
 ## Quick Start (Human Setup)
 
@@ -224,6 +235,12 @@ For multi-agent runs, always target a specific tab lease:
 node scripts/read-active-tab.js --tab-id "<TAB_ID>" --check --wait-for-attach --attach-timeout-ms 120000
 ```
 
+If `relay:doctor` reports `TAB_LEASED_BY_OTHER_SESSION`, inspect relay status and choose another attached tab without an active lease:
+
+```bash
+npm run relay:status -- --all --status-timeout-ms 3000
+```
+
 If your workflow will open background tabs via `Target.createTarget`, require that readiness explicitly:
 
 ```bash
@@ -275,6 +292,15 @@ WhatsApp messages:
 node scripts/read-active-tab.js --tab-id "<TAB_ID>" --preset whatsapp-messages --selector "#main [data-testid=\"conversation-panel-messages\"], #main" --max-messages 200 --pretty false
 ```
 
+## Concurrent Tab Workflows
+
+- Use `npm run relay:status -- --all --status-timeout-ms 3000` before choosing a tab for a concurrent run.
+- Treat `attachedTabs` as the candidate pool and `tabLeases` / `leasedSessionId` as the current lease view.
+- Prefer `leaseSummary.availableAttachedTabIds` when choosing the next `--tab-id`.
+- Pass `--tab-id` on every check/read command so the relay can keep controller routing scoped to that tab.
+- If doctor reports `TAB_LEASED_BY_OTHER_SESSION`, wait for that session to release the tab or choose another attached tab id from status.
+- Lease isolation only controls relay command routing for attached tabs. It does not create a separate Chrome profile, cookie jar, or full browser-process isolation.
+
 ## Multi-Port Behavior
 
 - Tabs without a saved mapping use the relay default port (`18793`).
@@ -316,6 +342,16 @@ npm run relay:status -- --status-timeout-ms 3000
 - Unsure whether relay + extension + attached tab are all actually ready:
   - Run `npm run relay:doctor -- --tab-id "<TAB_ID>" --json`.
   - Inspect `blocker.code`, `blocker.summary`, and `blocker.nextAction`.
+
+- Doctor says the requested tab is leased by another session:
+  - Run `npm run relay:status -- --all --status-timeout-ms 3000`.
+  - Inspect `attachedTabs`, `tabLeases`, and the blocker `detail` field to see which session owns which tab.
+  - Retry with another attached `tabId`, or wait for the owning session to release the tab.
+
+- Agent says a tab is already leased by another session:
+  - Run `npm run relay:status -- --all --status-timeout-ms 3000`.
+  - Inspect `attachedTabs[].leasedSessionId`, `tabLeases`, and `leaseSummary.availableAttachedTabIds`.
+  - Wait for the owning session to finish, or retry with another attached tab id that has no active lease.
 
 - Visible convenience folder missing after install:
   - Run `npm run extension:install` from the installed skill directory.
