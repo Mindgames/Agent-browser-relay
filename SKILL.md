@@ -177,6 +177,7 @@ If a mismatch is detected, the command also prints a human-friendly update hint 
 ## Common command examples
 
 In agent workflows, use the `--tab-id` variants. Unscoped commands are for manual/local debugging only.
+Prefer `--expression-file` or `--expression-stdin` over inline `--expression` for non-trivial JavaScript.
 
 ```bash
 node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --pretty false

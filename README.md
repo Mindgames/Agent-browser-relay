@@ -264,6 +264,8 @@ Full DOM:
 node scripts/read-active-tab.js --tab-id "<TAB_ID>" --expression "document.documentElement.outerHTML" --pretty false
 ```
 
+Prefer `--expression-file` or `--expression-stdin` for multi-line or quote-heavy expressions.
+
 Complex custom expression from file:
 
 ```bash
