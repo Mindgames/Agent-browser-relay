@@ -125,6 +125,8 @@ Override per command with `--host`, `--port`, and `--attach-timeout-ms` when nee
 - Run `npm run relay:doctor -- --host "127.0.0.1" --port "18793" --tab-id "<TAB_ID>" --json` before reads and proceed only when it succeeds.
 - If the workflow will open tabs via `Target.createTarget`, run `npm run relay:doctor -- --host "127.0.0.1" --port "18793" --require-target-create --json` and proceed only when it succeeds.
 - For all agent runs (single-agent and concurrent), always pass `--tab-id <tabId>` on check/read commands so every operation is lease-scoped.
+- In concurrent runs, attached tabs are shared extension state, but an attached tab can only have one active lease at a time. Inspect `npm run relay:status -- --all --status-timeout-ms 3000` and prefer `leaseSummary.availableAttachedTabIds` or `attachedTabs[].leasedSessionId` when choosing the next `--tab-id`.
+- If doctor returns `TAB_LEASED_BY_OTHER_SESSION`, do not attempt takeover. Wait for that session to finish or retry with another attached tab that has no active lease.
 - When `Target.createTarget` is enabled, the extension may create and auto-attach the first agent-controlled tab for the session without a human seed attach step.
 - Do not stop/restart relay during the task unless the human requests it or recovery is explicitly required.
 - Do not restart relay only because code was updated locally; updates are applied on next explicit human-approved restart.
@@ -168,6 +170,13 @@ If a mismatch is detected, the command also prints a human-friendly update hint 
 - Preset extraction for WhatsApp and generic chat-auditing with regex filters.
 - Attach-state polling with `--check --wait-for-attach`.
 
+## Concurrent workflow notes
+
+- Inspect `npm run relay:status -- --all --status-timeout-ms 3000` before selecting a tab for a concurrent run.
+- Use `attachedTabs` plus `leasedSessionId` / `tabLeases` to understand which attached tabs are currently free.
+- If doctor returns `TAB_LEASED_BY_OTHER_SESSION`, do not force takeover. Wait for that session to release the tab or pick another attached `tabId`.
+- Lease isolation scopes relay command routing per attached tab. It does not imply a separate browser profile or stronger browser-process isolation.
+
 ## Presets and filters
 
 - `--preset` values: `default`, `whatsapp`, `wa`, `whatsapp-messages`, `chat-audit`, `chat`.
@@ -201,3 +210,5 @@ For multiple agents on one relay:
 - Resolve tab ids from relay status (`npm run relay:status -- --all --status-timeout-ms 3000`).
 - Assign one tab id per agent.
 - Use `--tab-id` in every `read-active-tab.js` call for that agent.
+- Treat the extension instance as shared: leases prevent two controller sessions from driving the same attached tab, but they do not create separate Chrome profiles or separate extension processes.
+- If `relay:doctor` reports `TAB_LEASED_BY_OTHER_SESSION`, inspect `attachedTabs`, `tabLeases`, and blocker `detail`, then pick another attached tab or wait for the owning session to release it.

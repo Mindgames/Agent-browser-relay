@@ -221,13 +221,14 @@ async function printStatus() {
     return
   }
 
+  const normalizedPorts = normalizeStatusPorts(status)
   const lockOwner = readRelayLock()
   const state = readRelayState()
   const payload = {
     ok: true,
     host,
     port,
-    ports: Array.isArray(status.ports) ? status.ports : [],
+    ports: normalizedPorts,
     service: status.service,
     extensionConnected:
       status.extensionConnected === true || (Array.isArray(status.extensionPorts) && status.extensionPorts.length > 0),
@@ -244,6 +245,71 @@ async function printStatus() {
       Number.isInteger(state?.autoStopAt) && state.autoStopAt > Date.now() ? state.autoStopAt - Date.now() : null,
   }
   console.log(JSON.stringify(payload, null, 2))
+}
+
+function normalizeStatusPorts(status) {
+  if (Array.isArray(status.ports) && status.ports.length > 0) {
+    return status.ports.map((entry) => enrichPortLeaseSummary(entry))
+  }
+
+  if (Number.isInteger(Number(status.port))) {
+    return [enrichPortLeaseSummary({
+      port: Number(status.port),
+      extensionConnected: status.extensionConnected,
+      extensionLastSeenAgoMs: status.extensionLastSeenAgoMs,
+      queuedControllerCommands: status.queuedControllerCommands,
+      connectedControllerClients: status.connectedControllerClients,
+      pendingCommands: status.pendingCommands,
+      sessionCount: status.sessionCount,
+      attachedTabCount: status.attachedTabCount,
+      attachedLeaseCount: status.attachedLeaseCount,
+      leasedTabCount: status.leasedTabCount,
+      staleLeaseCount: status.staleLeaseCount,
+      activeTab: status.activeTab,
+      attachedTabs: status.attachedTabs,
+      tabLeases: status.tabLeases,
+      staleTabLeases: status.staleTabLeases,
+      lastHeartbeatTs: status.lastHeartbeatTs,
+      extensionVersion: status.extensionVersion,
+      extensionName: status.extensionName,
+      extensionCapabilities: status.extensionCapabilities,
+      allowTargetCreate: status.allowTargetCreate,
+    })]
+  }
+
+  return []
+}
+
+function enrichPortLeaseSummary(entry) {
+  const attachedTabs = Array.isArray(entry?.attachedTabs) ? entry.attachedTabs : []
+  const leasedAttachedTabs = attachedTabs
+    .filter((tab) => typeof tab?.leasedSessionId === 'string' && tab.leasedSessionId.length > 0)
+    .map((tab) => ({
+      tabId: tab.tabId,
+      sessionId: tab.leasedSessionId,
+      title: tab.title || null,
+      url: tab.url || null,
+    }))
+  const availableAttachedTabIds = attachedTabs
+    .filter((tab) => !tab?.leasedSessionId)
+    .map((tab) => tab.tabId)
+    .filter(Number.isInteger)
+    .sort((a, b) => a - b)
+  const attachedTabIds = attachedTabs
+    .map((tab) => tab.tabId)
+    .filter(Number.isInteger)
+    .sort((a, b) => a - b)
+  const staleTabLeases = Array.isArray(entry?.staleTabLeases) ? entry.staleTabLeases : []
+
+  return {
+    ...entry,
+    leaseSummary: {
+      attachedTabIds,
+      availableAttachedTabIds,
+      leasedAttachedTabs,
+      staleTabLeases,
+    },
+  }
 }
 
 async function runDoctor() {

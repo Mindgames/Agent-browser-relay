@@ -1264,6 +1264,24 @@ async function probeRelayConnectionForPopup(tabId, effectivePort) {
   }
 }
 
+async function fetchRelayStatusForPopup(effectivePort) {
+  const statusPort = Number.isInteger(effectivePort)
+    ? effectivePort
+    : Number.isInteger(currentRelayPort)
+      ? currentRelayPort
+      : DEFAULT_PORT
+  try {
+    const response = await fetch(`http://127.0.0.1:${statusPort}/status?all=1`, {
+      signal: AbortSignal.timeout(2000),
+    })
+    if (!response.ok) return null
+    const payload = await response.json().catch(() => null)
+    return payload && payload.ok ? payload : null
+  } catch {
+    return null
+  }
+}
+
 function onDebuggerEvent(source, method, params) {
   dbg('onDebuggerEvent', { tabId: source?.tabId, method })
   const tabId = source.tabId
@@ -1356,6 +1374,23 @@ async function getPopupState(tabId, includeAllTabs = true) {
     : defaultPort
   const relayConnectError = await probeRelayConnectionForPopup(requestedTabId, effectivePort)
   const relayConnected = relayWs && relayWs.readyState === WebSocket.OPEN
+  const relayStatus = await fetchRelayStatusForPopup(effectivePort)
+  const relayPorts = Array.isArray(relayStatus?.ports) ? relayStatus.ports : relayStatus ? [relayStatus] : []
+  const attachedTabsFromRelay = relayPorts.flatMap((entry) => (Array.isArray(entry?.attachedTabs) ? entry.attachedTabs : []))
+  const leaseByTabId = new Map()
+  for (const entry of attachedTabsFromRelay) {
+    const entryTabId = normalizeTabId(entry?.tabId)
+    if (!entryTabId) continue
+    leaseByTabId.set(entryTabId, typeof entry?.leasedSessionId === 'string' ? entry.leasedSessionId : null)
+  }
+  const attachedLeaseCount = relayPorts.reduce((sum, entry) => {
+    const count = Number(entry?.attachedLeaseCount)
+    return sum + (Number.isFinite(count) ? count : 0)
+  }, 0)
+  const staleLeaseCount = relayPorts.reduce((sum, entry) => {
+    const count = Number(entry?.staleLeaseCount)
+    return sum + (Number.isFinite(count) ? count : 0)
+  }, 0)
 
   let activeTab = null
   if (Number.isInteger(requestedTabId)) {
@@ -1373,6 +1408,7 @@ async function getPopupState(tabId, includeAllTabs = true) {
       ...base,
       state: tabState.state || 'unknown',
       port: await getRelayPort(entryTabId),
+      leasedSessionId: leaseByTabId.get(entryTabId) || null,
     })
   }
 
@@ -1394,6 +1430,8 @@ async function getPopupState(tabId, includeAllTabs = true) {
     userAttachmentEnabled,
     allowTargetCreate,
     activeTabState: requestedTabId && tabs.get(requestedTabId)?.state ? tabs.get(requestedTabId).state : null,
+    attachedLeaseCount,
+    staleLeaseCount,
     connectedTabs,
   }
 }

@@ -1569,6 +1569,14 @@ function sanitizeStatusTab(value) {
   }
 }
 
+function sanitizeStatusLease(value) {
+  if (!value || typeof value !== 'object') return null
+  return {
+    tabId: Number.isInteger(value.tabId) ? value.tabId : null,
+    sessionId: typeof value.sessionId === 'string' ? value.sessionId : null,
+  }
+}
+
 function summarizeRelayPorts(statusPayload) {
   const rawPorts = Array.isArray(statusPayload?.ports)
     ? statusPayload.ports
@@ -1580,6 +1588,11 @@ function summarizeRelayPorts(statusPayload) {
           queuedControllerCommands: statusPayload?.queuedControllerCommands,
           activeTab: statusPayload?.activeTab,
           attachedTabs: statusPayload?.attachedTabs,
+          attachedLeaseCount: statusPayload?.attachedLeaseCount,
+          leasedTabCount: statusPayload?.leasedTabCount,
+          staleLeaseCount: statusPayload?.staleLeaseCount,
+          tabLeases: statusPayload?.tabLeases,
+          staleTabLeases: statusPayload?.staleTabLeases,
           allowTargetCreate: statusPayload?.allowTargetCreate,
         },
       ]
@@ -1596,8 +1609,21 @@ function summarizeRelayPorts(statusPayload) {
       queuedControllerCommands: Number.isFinite(Number(raw.queuedControllerCommands))
         ? Number(raw.queuedControllerCommands)
         : null,
+      attachedLeaseCount: Number.isFinite(Number(raw.attachedLeaseCount))
+        ? Number(raw.attachedLeaseCount)
+        : null,
+      leasedTabCount: Number.isFinite(Number(raw.leasedTabCount))
+        ? Number(raw.leasedTabCount)
+        : null,
+      staleLeaseCount: Number.isFinite(Number(raw.staleLeaseCount))
+        ? Number(raw.staleLeaseCount)
+        : null,
       activeTab: sanitizeStatusTab(raw.activeTab),
       attachedTabs: Array.isArray(raw.attachedTabs) ? raw.attachedTabs.map(sanitizeStatusTab).filter(Boolean) : [],
+      tabLeases: Array.isArray(raw.tabLeases) ? raw.tabLeases.map(sanitizeStatusLease).filter(Boolean) : [],
+      staleTabLeases: Array.isArray(raw.staleTabLeases)
+        ? raw.staleTabLeases.map(sanitizeStatusLease).filter(Boolean)
+        : [],
       extensionVersion: typeof raw.extensionVersion === 'string' ? raw.extensionVersion : null,
       extensionName: typeof raw.extensionName === 'string' ? raw.extensionName : null,
       extensionCapabilities:
@@ -1645,6 +1671,34 @@ function formatAvailableTabIds(portStatus) {
     .map((entry) => entry.tabId)
     .filter(Number.isInteger)
     .sort((a, b) => a - b)
+    .join(', ')
+}
+
+function formatLeasedTabIds(portStatus) {
+  if (!portStatus || !Array.isArray(portStatus.attachedTabs) || portStatus.attachedTabs.length === 0) return null
+  const leasedIds = portStatus.attachedTabs
+    .filter((entry) => typeof entry.leasedSessionId === 'string' && entry.leasedSessionId.length > 0)
+    .map((entry) => entry.tabId)
+    .filter(Number.isInteger)
+    .sort((a, b) => a - b)
+  return leasedIds.length > 0 ? leasedIds.join(', ') : null
+}
+
+function formatAlternativeTabIds(portStatus, excludedTabId, options = {}) {
+  if (!portStatus || !Array.isArray(portStatus.attachedTabs) || portStatus.attachedTabs.length === 0) return null
+  const filtered = portStatus.attachedTabs
+    .filter((entry) => entry.tabId !== excludedTabId)
+    .filter((entry) => !options.excludeLeased || !entry.leasedSessionId)
+    .map((entry) => entry.tabId)
+    .filter(Number.isInteger)
+    .sort((a, b) => a - b)
+  return filtered.length > 0 ? filtered.join(', ') : null
+}
+
+function formatLeaseSummary(portStatus) {
+  if (!portStatus || !Array.isArray(portStatus.tabLeases) || portStatus.tabLeases.length === 0) return null
+  return portStatus.tabLeases
+    .map((entry) => `${entry.tabId} (${entry.sessionId})`)
     .join(', ')
 }
 
@@ -1726,11 +1780,22 @@ function buildRequestedTabBlocker(snapshot, tabId) {
   const targetTab = findAttachedTabOnPort(targetStatus, tabId)
   if (targetTab) {
     if (targetTab.leasedSessionId && targetTab.leasedSessionId !== relaySessionId) {
+      const otherUnleasedTabIds = formatAlternativeTabIds(targetStatus, tabId, { excludeLeased: true })
+      const otherAttachedTabIds = formatAlternativeTabIds(targetStatus, tabId)
+      const detail = [
+        `Attached tab: ${describeStatusTab(targetTab)}.`,
+        `Current lease owner: ${targetTab.leasedSessionId}.`,
+        otherUnleasedTabIds
+          ? `Other unleased attached tab ids on port ${relayPort}: ${otherUnleasedTabIds}.`
+          : otherAttachedTabIds
+            ? `Other attached tab ids on port ${relayPort} are currently leased or unavailable: ${otherAttachedTabIds}.`
+            : `No other attached tabs are currently available on port ${relayPort}.`,
+      ].join(' ')
       return createBlocker(
         'TAB_LEASED_BY_OTHER_SESSION',
         `Tab ${tabId} is already leased by session ${targetTab.leasedSessionId} on relay port ${relayPort}.`,
-        'Choose another attached tab, or wait for the active controller session to release this lease before retrying.',
-        { retryable: false, detail: describeStatusTab(targetTab) },
+        `Wait for session ${targetTab.leasedSessionId} to release tab ${tabId}, or choose another attached tab from \`npm run relay:status -- --all --status-timeout-ms 3000\` and retry with that \`--tab-id\`.`,
+        { retryable: false, detail },
       )
     }
     return null
@@ -1742,16 +1807,24 @@ function buildRequestedTabBlocker(snapshot, tabId) {
       'TAB_ATTACHED_ON_OTHER_PORT',
       `Tab ${tabId} is attached on relay port ${attachedElsewhere.port}, not ${relayPort}.`,
       `Re-run this command with --port "${attachedElsewhere.port}", or re-attach tab ${tabId} to relay port ${relayPort}.`,
-      { retryable: false, detail: describeStatusTab(attachedElsewhere.tab) },
+      { retryable: false, detail: `Attached tab on relay port ${attachedElsewhere.port}: ${describeStatusTab(attachedElsewhere.tab)}.` },
     )
   }
 
   const availableTabIds = formatAvailableTabIds(targetStatus)
-  const detail = availableTabIds ? `Attached tab ids on port ${relayPort}: ${availableTabIds}.` : null
+  const unleasedTabIds = formatAlternativeTabIds(targetStatus, null, { excludeLeased: true })
+  const leasedTabIds = formatLeasedTabIds(targetStatus)
+  const leaseSummary = formatLeaseSummary(targetStatus)
+  const detail = [
+    availableTabIds ? `Attached tab ids on port ${relayPort}: ${availableTabIds}.` : null,
+    unleasedTabIds ? `Attached tab ids without an active lease: ${unleasedTabIds}.` : null,
+    leasedTabIds ? `Attached tab ids currently leased by another session: ${leasedTabIds}.` : null,
+    leaseSummary ? `Current lease owners on port ${relayPort}: ${leaseSummary}.` : null,
+  ].filter(Boolean).join(' ') || null
   return createBlocker(
     'TAB_NOT_ATTACHED',
     `Tab ${tabId} is not attached on relay port ${relayPort}.`,
-    `Focus tab ${tabId} in Chrome, open the Agent Browser Relay popup, click "Attach this tab", then retry.`,
+    `Focus tab ${tabId} in Chrome and attach it in the popup, or choose another attached tab from \`npm run relay:status -- --all --status-timeout-ms 3000\` before retrying.`,
     { detail },
   )
 }
@@ -1759,6 +1832,7 @@ function buildRequestedTabBlocker(snapshot, tabId) {
 function mapCommandErrorToBlocker(error, snapshot, tabId) {
   const rawMessage = error instanceof Error ? error.message : String(error || 'Relay check failed')
   const message = rawMessage.toLowerCase()
+  const requestedTabBlocker = Number.isInteger(tabId) && snapshot ? buildRequestedTabBlocker(snapshot, tabId) : null
 
   if (message.includes('relay status check failed') || message.includes('relay not reachable')) {
     return createBlocker(
@@ -1768,19 +1842,20 @@ function mapCommandErrorToBlocker(error, snapshot, tabId) {
     )
   }
 
+  if (requestedTabBlocker?.code === 'TAB_LEASED_BY_OTHER_SESSION') {
+    return requestedTabBlocker
+  }
+
   if (message.includes('already leased by session')) {
     return createBlocker(
       'TAB_LEASED_BY_OTHER_SESSION',
       rawMessage,
-      'Choose another attached tab, or wait for the active controller session to release this lease before retrying.',
+      'Inspect `npm run relay:status -- --all --status-timeout-ms 3000`, choose another attached tab, or wait for the active controller session to release this lease before retrying.',
       { retryable: false },
     )
   }
 
-  if (Number.isInteger(tabId)) {
-    const requestedTabBlocker = snapshot ? buildRequestedTabBlocker(snapshot, tabId) : null
-    if (requestedTabBlocker) return requestedTabBlocker
-  }
+  if (requestedTabBlocker) return requestedTabBlocker
 
   if (message.includes('target.createtarget is disabled')) {
     return createBlocker(
