@@ -1,3 +1,4 @@
 interface:
   display_name: "Agent Browser Relay"
-  short_description: "Help with Agent Browser Relay tab-reader tasks"
+  short_description: "Relay-backed attached-tab reads and preflight"
+  default_prompt: "Use $agent-browser-relay to read, preflight, or troubleshoot an attached Chrome tab through the local relay."
