@@ -4,9 +4,18 @@ All notable changes to Agent Browser Relay are tracked here.
 
 ## [Unreleased]
 
+- No unreleased entries yet.
+
+## [0.0.13] - 2026-04-02
+
+### Added
+
+- Added a top-level `CHANGELOG.md` so shipped release history lives in the repo instead of only in GitHub releases.
+
 ### Changed
 
 - Refreshed the extension icon set with a simpler dark monogram mark that matches the popup and options page styling more closely.
+- Improved the Agent Browser Relay skill trigger metadata and `agents/openai.yaml` invocation guidance so the skill is easier to discover and invoke correctly.
 
 ## [0.0.12] - 2026-04-02
 
