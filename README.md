@@ -4,6 +4,8 @@ Agent Browser Relay lets your agent control and read from tabs in your real Chro
 
 Chrome remains the documented target. Chromium-based browsers that can load the extension may also work, and relay status now reports the detected host browser and profile id, but that is visibility support rather than a guaranteed cross-browser orchestration feature.
 
+Release history lives in [`CHANGELOG.md`](./CHANGELOG.md).
+
 ## Why Use It
 
 - Run agent reads on multiple attached tabs concurrently with per-tab lease scoping (`--tab-id`) inside one shared extension instance.
