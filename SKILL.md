@@ -60,7 +60,7 @@ Override per command with `--host`, `--port`, and `--attach-timeout-ms` when nee
    Agent requirement: before any attach step on a fresh machine, ask the human to open the popup once, then confirm:
 
    ```bash
-   npm run extension:status -- --wait-for-connected --connected-timeout-ms 120000
+   npm run extension:status -- --port "18793" --wait-for-connected --connected-timeout-ms 120000
    ```
 
 4. Attach the extension to the target tab (open toolbar popup and click attach)
@@ -120,7 +120,7 @@ Override per command with `--host`, `--port`, and `--attach-timeout-ms` when nee
   - `npm run relay:status -- --status-timeout-ms 3000`
   - `curl --max-time 3 -sS "http://127.0.0.1:18793/status"`
   - `npm run relay:status -- --all --status-timeout-ms 3000`
-- After `relay:start`, pause and ask the human to open the popup once so `npm run extension:status -- --wait-for-connected --connected-timeout-ms 120000` can confirm Chrome actually loaded the extension.
+- After `relay:start`, pause and ask the human to open the popup once so `npm run extension:status -- --port "18793" --wait-for-connected --connected-timeout-ms 120000` can confirm Chrome actually loaded the extension.
 - Only after `extension:status` succeeds, either ask the human to attach the target tab before reads, or confirm that **Allow agent to create new background tabs** is enabled before first-tab creation workflows.
 - Run `npm run relay:doctor -- --host "127.0.0.1" --port "18793" --tab-id "<TAB_ID>" --json` before reads and proceed only when it succeeds.
 - If the workflow will open tabs via `Target.createTarget`, run `npm run relay:doctor -- --host "127.0.0.1" --port "18793" --require-target-create --json` and proceed only when it succeeds.
@@ -143,6 +143,8 @@ Override per command with `--host`, `--port`, and `--attach-timeout-ms` when nee
    ```bash
    ./scripts/preflight.sh
    ```
+
+   This is a local smoke wrapper. For agent workflows, the canonical preflight remains `npm run relay:doctor -- --port "18793" --tab-id "<TAB_ID>" --json` for attached tabs, or `npm run relay:doctor -- --port "18793" --require-target-create --json` for first-tab creation workflows.
 
 If the current working directory is not the installed skill root, use the absolute `Stable read CLI path` printed by `npm run extension:path` instead of a relative `node scripts/read-active-tab.js` path.
 

@@ -178,6 +178,7 @@ const pendingPongs = []
 let nextId = 1
 
 let activeSocket = false
+let socketOpenedOnce = false
 let rejectAllPending
 let relaySessionId = null
 let leasedTabId = Number.isInteger(requestedTabId) ? requestedTabId : null
@@ -242,6 +243,7 @@ function getObservedExtensionVersion() {
 
 socket.addEventListener('open', () => {
   activeSocket = true
+  socketOpenedOnce = true
 })
 
 socket.addEventListener('close', (event) => {
@@ -281,7 +283,9 @@ socket.addEventListener('message', (event) => {
 })
 
 socket.addEventListener('error', (error) => {
-  console.error('Relay websocket error', error.message || error)
+  if (socketOpenedOnce) {
+    console.error('Relay websocket error', error.message || error)
+  }
 })
 
 function parseArgs(argv) {
@@ -1561,6 +1565,20 @@ function buildBlockedCheckResult(relay, extension, blocker) {
   }
 }
 
+function createReadinessErrorFromState(readinessState) {
+  const blocker = readinessState?.blocker || null
+  const message = blocker ? formatBlockerMessage(blocker) : 'Relay readiness check failed.'
+  const error = new Error(message)
+  error.readinessState = {
+    ...(readinessState || {}),
+    ok: false,
+    failure: {
+      message,
+    },
+  }
+  return error
+}
+
 function buildPortMismatchHint(snapshot) {
   const mismatchPorts = snapshot.activePorts.filter((port) => port !== relayPort)
   if (mismatchPorts.length === 0) return null
@@ -1590,6 +1608,7 @@ function assertNoPortMismatch(snapshot) {
 }
 
 function buildExtensionConnectionBlocker(snapshot) {
+  const targetStatus = findRelayPortStatus(snapshot, relayPort)
   const mismatchHint = buildPortMismatchHint(snapshot)
   if (mismatchHint) {
     return createBlocker(
@@ -1600,10 +1619,18 @@ function buildExtensionConnectionBlocker(snapshot) {
     )
   }
 
+  if (targetStatus?.extensionLastSeenAgoMs === null) {
+    return createBlocker(
+      'EXTENSION_LOAD_NOT_CONFIRMED',
+      `Relay is reachable at ${relayStatusUrl}, but Chrome has not confirmed loading the extension on port ${relayPort} yet.`,
+      `Open the Agent Browser Relay popup once so Chrome wakes the extension, then run \`npm run extension:status -- --port "${relayPort}" --wait-for-connected --connected-timeout-ms 120000\` and retry.`,
+    )
+  }
+
   return createBlocker(
     'EXTENSION_NOT_CONNECTED',
     `Relay is reachable at ${relayStatusUrl}, but the Chrome extension is not connected on port ${relayPort}.`,
-    'Open the Agent Browser Relay popup once so Chrome wakes the extension, then run `npm run extension:status -- --wait-for-connected --connected-timeout-ms 120000` and retry.',
+    `Open the Agent Browser Relay popup once so Chrome wakes the extension, then run \`npm run extension:status -- --port "${relayPort}" --wait-for-connected --connected-timeout-ms 120000\` and retry.`,
   )
 }
 
@@ -1703,11 +1730,40 @@ function mapCommandErrorToBlocker(error, snapshot, tabId) {
   )
 }
 
-async function assertRelayConnectionReady() {
+async function ensureBridgeReadyForCommand() {
+  if (waitForAttach && attachTimeoutMs > 0) {
+    await waitForAttachmentReady({ timeoutMs: attachTimeoutMs, pollMs: attachPollMs })
+    return
+  }
+
+  const status = await checkBridge()
+  if (!status.ok) {
+    throw createReadinessErrorFromState(status)
+  }
+}
+
+async function ensureMetadataReadyForCommand() {
+  const relay = {
+    reachable: true,
+    extensionConnected: false,
+    ping: false,
+    queueDepth: null,
+    extensionLastSeenAgoMs: null,
+    targetCreateAllowed: null,
+    activePorts: [],
+    ports: [],
+  }
+  const extension = {
+    connected: false,
+    error: null,
+  }
+
   const status = await getRelayStatus(false)
   if (!status.ok) {
-    throw new Error(
-      formatBlockerMessage(
+    throw createReadinessErrorFromState(
+      buildBlockedCheckResult(
+        relay,
+        extension,
         createBlocker(
           'RELAY_UNREACHABLE',
           `Relay is not reachable at ${relayStatusUrl}.`,
@@ -1716,15 +1772,95 @@ async function assertRelayConnectionReady() {
       ),
     )
   }
+
   const snapshot = summarizeRelayPorts(status)
   const targetStatus = findRelayPortStatus(snapshot, relayPort)
-  if (!targetStatus || !targetStatus.extensionConnected) {
-    throw new Error(formatBlockerMessage(buildExtensionConnectionBlocker(snapshot)))
+  relay.extensionConnected = Boolean(targetStatus ? targetStatus.extensionConnected : status.extensionConnected)
+  relay.extensionLastSeenAgoMs = targetStatus?.extensionLastSeenAgoMs ?? null
+  relay.queueDepth = Number.isFinite(Number(targetStatus?.queuedControllerCommands))
+    ? Number(targetStatus.queuedControllerCommands)
+    : Number.isFinite(Number(status.queuedControllerCommands))
+      ? Number(status.queuedControllerCommands)
+      : null
+  relay.targetCreateAllowed = typeof targetStatus?.allowTargetCreate === 'boolean'
+    ? targetStatus.allowTargetCreate
+    : null
+  relay.activePorts = snapshot.activePorts
+  relay.ports = snapshot.ports
+
+  if (!relay.extensionConnected) {
+    throw createReadinessErrorFromState(buildBlockedCheckResult(relay, extension, buildExtensionConnectionBlocker(snapshot)))
   }
+
   const requestedTabBlocker = buildRequestedTabBlocker(snapshot, requestedTabId)
   if (requestedTabBlocker) {
-    throw new Error(formatBlockerMessage(requestedTabBlocker))
+    throw createReadinessErrorFromState(buildBlockedCheckResult(relay, extension, requestedTabBlocker))
   }
+
+  if (Number.isInteger(requestedTabId)) {
+    await ensureRelayTabLease(requestedTabId)
+  }
+}
+
+async function buildInitialConnectionFailureState() {
+  const relay = {
+    reachable: false,
+    extensionConnected: false,
+    ping: false,
+    queueDepth: null,
+    extensionLastSeenAgoMs: null,
+    targetCreateAllowed: null,
+    activePorts: [],
+    ports: [],
+  }
+  const extension = {
+    connected: false,
+    error: null,
+  }
+
+  const status = await getRelayStatus(false)
+  if (!status.ok) {
+    return buildBlockedCheckResult(
+      relay,
+      extension,
+      createBlocker(
+        'RELAY_UNREACHABLE',
+        `Relay is not reachable at ${relayStatusUrl}.`,
+        `Start the relay on ${relayHost}:${relayPort}, then retry this command.`,
+      ),
+    )
+  }
+
+  const snapshot = summarizeRelayPorts(status)
+  const targetStatus = findRelayPortStatus(snapshot, relayPort)
+  relay.reachable = true
+  relay.extensionConnected = Boolean(targetStatus ? targetStatus.extensionConnected : status.extensionConnected)
+  relay.extensionLastSeenAgoMs = targetStatus?.extensionLastSeenAgoMs ?? null
+  relay.queueDepth = Number.isFinite(Number(targetStatus?.queuedControllerCommands))
+    ? Number(targetStatus.queuedControllerCommands)
+    : Number.isFinite(Number(status.queuedControllerCommands))
+      ? Number(status.queuedControllerCommands)
+      : null
+  relay.targetCreateAllowed = typeof targetStatus?.allowTargetCreate === 'boolean'
+    ? targetStatus.allowTargetCreate
+    : null
+  relay.activePorts = snapshot.activePorts
+  relay.ports = snapshot.ports
+
+  if (!relay.extensionConnected) {
+    return buildBlockedCheckResult(relay, extension, buildExtensionConnectionBlocker(snapshot))
+  }
+
+  return buildBlockedCheckResult(
+    relay,
+    extension,
+    createBlocker(
+      'RELAY_WEBSOCKET_UNAVAILABLE',
+      `Failed to connect to relay websocket ${wsUrl}.`,
+      `Confirm the relay is healthy on ${relayHost}:${relayPort}, then rerun \`npm run relay:doctor -- --host "${relayHost}" --port "${relayPort}" --json\`.`,
+      { retryable: false },
+    ),
+  )
 }
 
 async function evaluateWithRecovery() {
@@ -2004,8 +2140,16 @@ async function main() {
 
   const opened = await waitForSocket(4000)
   if (!opened) {
-    console.error(`Failed to connect websocket ${wsUrl}`)
+    const failureState = await buildInitialConnectionFailureState()
+    const error = createReadinessErrorFromState(failureState)
+    if (checkOnly) {
+      const output = pretty ? JSON.stringify(error.readinessState, null, 2) : JSON.stringify(error.readinessState)
+      process.stdout.write(`${output}\n`)
+    } else {
+      console.error(error.message)
+    }
     process.exit(1)
+    return
   }
 
   await getRelayStatus(false)
@@ -2064,12 +2208,7 @@ async function main() {
     }
 
     if (metadataOnly) {
-      if (waitForAttach && attachTimeoutMs > 0) {
-        await waitForAttachmentReady({ timeoutMs: attachTimeoutMs, pollMs: attachPollMs })
-      }
-
-      await assertRelayConnectionReady()
-      await prepareTargetTabForCommand()
+      await ensureMetadataReadyForCommand()
 
       const metadata = await sendRelayCommand('Grais.debugger.getActiveTabMetadata')
       if (!metadata || metadata.error) {
@@ -2088,11 +2227,7 @@ async function main() {
     }
 
     if (screenshotOnly) {
-      if (waitForAttach && attachTimeoutMs > 0) {
-        await waitForAttachmentReady({ timeoutMs: attachTimeoutMs, pollMs: attachPollMs })
-      }
-
-      await assertRelayConnectionReady()
+      await ensureBridgeReadyForCommand()
 
       const result = await captureScreenshotWithRecovery({
         format: screenshotFormat,
@@ -2128,11 +2263,7 @@ async function main() {
       return
     }
 
-    if (waitForAttach && attachTimeoutMs > 0) {
-      await waitForAttachmentReady({ timeoutMs: attachTimeoutMs, pollMs: attachPollMs })
-    }
-
-    await assertRelayConnectionReady()
+    await ensureBridgeReadyForCommand()
 
     const result = await evaluateWithRecovery()
 
@@ -2170,6 +2301,9 @@ async function main() {
       return
     }
     console.error(error instanceof Error ? error.message : String(error))
+    if (error && typeof error === 'object' && error.readinessState?.blocker?.detail) {
+      console.error(error.readinessState.blocker.detail)
+    }
     process.exit(1)
   } finally {
     await closeRelaySession().catch(() => {})

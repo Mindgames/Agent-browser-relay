@@ -219,14 +219,15 @@
         <ol class="list">
           <li>Start relay.</li>
           <li>Open popup once.</li>
-          <li>Attach target tab.</li>
-          <li>Run <code>npm run relay:doctor -- --tab-id "&lt;TAB_ID&gt;" --json</code>.</li>
+          <li>Run <code>npm run extension:status -- --port "18793" --wait-for-connected --connected-timeout-ms 120000</code>.</li>
+          <li>Attach the target tab for existing-tab workflows, or enable background-tab creation for first-tab workflows.</li>
+          <li>Run <code>npm run relay:doctor -- --port "18793" --tab-id "&lt;TAB_ID&gt;" --json</code> for an attached tab, or <code>npm run relay:doctor -- --port "18793" --require-target-create --json</code> before creating the first agent tab.</li>
         </ol>
       </section>
 
       <section class="panel">
         <h2>Agent prompt</h2>
-        <pre><code>Use Agent Browser Relay on my attached Chrome tab. Resolve the tab ID from relay status, run `npm run relay:doctor -- --tab-id "&lt;TAB_ID&gt;" --json`, and only then return a concise summary with the most important links.</code></pre>
+        <pre><code>Use Agent Browser Relay on my attached Chrome tab. Resolve the tab ID from relay status, run `npm run relay:doctor -- --port "18793" --tab-id "&lt;TAB_ID&gt;" --json`, and only then return a concise summary with the most important links.</code></pre>
       </section>
 
       <section class="panel">

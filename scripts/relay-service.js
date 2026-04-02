@@ -254,7 +254,7 @@ async function printExtensionConnectionGuidance() {
     console.warn(
       [
         `[agent-browser-relay] Relay is not reachable yet on port ${targetPort}, so Chrome extension load cannot be confirmed yet.`,
-        `[agent-browser-relay] Once the relay is up, run: npm run extension:status -- --port "${targetPort}" --status-timeout-ms ${statusTimeoutMs}`,
+        `[agent-browser-relay] Once the relay is up, run: npm run extension:status -- --port "${targetPort}" --wait-for-connected --connected-timeout-ms 120000`,
       ].join('\n'),
     )
     return
@@ -269,7 +269,7 @@ async function printExtensionConnectionGuidance() {
     [
       `[agent-browser-relay] Relay is up, but Chrome extension load is not confirmed on port ${targetPort}.`,
       'Open the Agent Browser Relay popup once in Chrome to wake the extension, then run:',
-      `[agent-browser-relay]   npm run extension:status -- --port "${targetPort}" --status-timeout-ms ${statusTimeoutMs}`,
+      `[agent-browser-relay]   npm run extension:status -- --port "${targetPort}" --wait-for-connected --connected-timeout-ms 120000`,
     ].join('\n'),
   )
 }

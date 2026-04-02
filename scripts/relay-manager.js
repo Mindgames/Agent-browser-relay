@@ -325,7 +325,7 @@ async function printExtensionConnectionGuidance() {
     [
       `[agent-browser-relay] Relay is up, but Chrome extension load is not confirmed on port ${port}.${portHint}`,
       'Open the Agent Browser Relay popup once in Chrome to wake the extension, then run:',
-      `[agent-browser-relay]   npm run extension:status -- --port "${port}" --status-timeout-ms ${statusTimeoutMs}`,
+      `[agent-browser-relay]   npm run extension:status -- --port "${port}" --wait-for-connected --connected-timeout-ms 120000`,
     ].join('\n'),
   )
 }
