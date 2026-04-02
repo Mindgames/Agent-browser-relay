@@ -208,7 +208,7 @@ async function refresh() {
       return
     }
     if (Number.isInteger(response.relayPortConnected)) {
-      setStatus('')
+      setStatus(`Relay connected on ${response.relayPortConnected}.`)
       return
     }
     setStatus('Relay not connected.')

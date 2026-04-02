@@ -106,7 +106,7 @@ This is a fallback only. The primary install path is still the one from your glo
 5. Or confirm from the terminal:
 
 ```bash
-npm run extension:status -- --wait-for-connected --connected-timeout-ms 120000
+npm run extension:status -- --port "18793" --wait-for-connected --connected-timeout-ms 120000
 ```
 
 ### 5) Attach tabs and allow broader tab control
@@ -130,10 +130,10 @@ Expected flow:
    - otherwise `~/.agents/skills/agent-browser-relay/extension` for a global install
    - `<your-checkout>/extension` for a project or local checkout
    - or asks you to run `npm run extension:path`
-3. Agent asks you to open the popup once so Chrome proves the extension is loaded, then checks `npm run extension:status`.
+3. Agent asks you to open the popup once so Chrome proves the extension is loaded, then checks `npm run extension:status -- --port "18793" --wait-for-connected --connected-timeout-ms 120000`.
 4. If the workflow needs a specific existing tab, agent asks you to click **Attach this tab** in the popup.
 5. If the workflow only needs a new agent-created tab, the agent can create it itself once **Allow agent to create new background tabs** is enabled.
-6. Agent runs `npm run relay:doctor -- --tab-id 4581930 --json` (or `--require-target-create` for first-tab creation workflows) and continues only when it returns success.
+6. Agent runs `npm run relay:doctor -- --port "18793" --tab-id 4581930 --json` for existing-tab workflows, or `npm run relay:doctor -- --port "18793" --require-target-create --json` for first-tab creation workflows, and continues only when it returns success.
 
 ## Relay Skill Paths
 
@@ -220,20 +220,28 @@ node scripts/relay-manager.js start --auto-stop-ms 10800000
 After relay startup, a human must confirm the extension is loaded before any read or tab-create workflow:
 1. Open/focus target tab in Chrome.
 2. Open Agent Browser Relay popup once and confirm the popup shows `Relay connected on <port>`.
-3. Or confirm from the terminal with `npm run extension:status -- --wait-for-connected --connected-timeout-ms 120000`.
+3. Confirm from the terminal with `npm run extension:status -- --port "18793" --wait-for-connected --connected-timeout-ms 120000`.
 4. If you want the agent to work on an existing tab, click **Attach this tab**.
 5. If you want the agent to create its own first tab, enable **Allow agent to create new background tabs** in the popup.
 
-Then run:
+Then run the canonical preflight for an existing attached tab:
 
 ```bash
-node scripts/read-active-tab.js --check --wait-for-attach --attach-timeout-ms 120000
+npm run relay:doctor -- --port "18793" --tab-id "<TAB_ID>" --json
 ```
+
+If your workflow will create the first agent-controlled tab via `Target.createTarget`, require that readiness explicitly:
+
+```bash
+npm run relay:doctor -- --port "18793" --require-target-create --json
+```
+
+`node scripts/read-active-tab.js --check ...` remains available as the lower-level equivalent for local/manual debugging, but `relay:doctor` is the canonical agent preflight.
 
 For multi-agent runs, always target a specific tab lease:
 
 ```bash
-node scripts/read-active-tab.js --tab-id "<TAB_ID>" --check --wait-for-attach --attach-timeout-ms 120000
+npm run relay:doctor -- --port "18793" --tab-id "<TAB_ID>" --json
 ```
 
 If `relay:doctor` reports `TAB_LEASED_BY_OTHER_SESSION`, inspect relay status and choose another attached tab without an active lease:
@@ -245,7 +253,7 @@ npm run relay:status -- --all --status-timeout-ms 3000
 If your workflow will open background tabs via `Target.createTarget`, require that readiness explicitly:
 
 ```bash
-node scripts/read-active-tab.js --check --require-target-create
+npm run relay:doctor -- --port "18793" --require-target-create --json
 ```
 
 ## Health Check (Timeout Required)
@@ -346,16 +354,16 @@ npm run relay:status -- --status-timeout-ms 3000
 
 - Unsure whether Chrome actually loaded the extension:
   - Open the Agent Browser Relay popup once.
-  - Run `npm run extension:status -- --wait-for-connected --connected-timeout-ms 120000`.
+  - Run `npm run extension:status -- --port "18793" --wait-for-connected --connected-timeout-ms 120000`.
   - Continue only when it reports `Chrome extension connected`.
 
 - Agent says it cannot create a new tab yet:
   - Enable **Allow agent to create new background tabs** in the popup.
-  - Re-run `npm run relay:doctor -- --require-target-create --json`.
+  - Re-run `npm run relay:doctor -- --port "18793" --require-target-create --json`.
   - If you want the agent to use an existing tab instead, attach that tab and pass its `tabId`.
 
 - Unsure whether relay + extension + attached tab are all actually ready:
-  - Run `npm run relay:doctor -- --tab-id "<TAB_ID>" --json`.
+  - Run `npm run relay:doctor -- --port "18793" --tab-id "<TAB_ID>" --json`.
   - Inspect `blocker.code`, `blocker.summary`, and `blocker.nextAction`.
 
 - Doctor says the requested tab is leased by another session:
