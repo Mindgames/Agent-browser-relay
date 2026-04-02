@@ -20,6 +20,8 @@ const SKILL_CAPABILITIES = Object.freeze({
     '--screenshot',
     '--screenshot-full-page',
     '--expression',
+    '--expression-file',
+    '--expression-stdin',
     '--preset',
     '--tab-id',
     '--wait-for-attach',
@@ -92,6 +94,14 @@ if (options.help) {
   process.exit(0)
 }
 
+let resolvedExpressionInput = null
+try {
+  resolvedExpressionInput = resolveExpressionInput(options)
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error))
+  process.exit(1)
+}
+
 const relayHost = String(options.host || DEFAULT_HOST).trim() || DEFAULT_HOST
 const relayPort = parsePositiveInt(options.port, DEFAULT_PORT, 'port')
 const relayStatusUrl = `http://${relayHost}:${relayPort}/status`
@@ -152,24 +162,6 @@ const excludeSenderRegex = parseRegexOption(
 )
 const maxMessages = parsePositiveInt(options.maxMessages, DEFAULT_MESSAGE_MAX_MESSAGES, 'max-messages')
 
-const expression =
-  options.expression ||
-  buildBridgeExpression({
-    preset,
-    selector,
-    textRegex,
-    excludeTextRegex,
-    linkTextRegex,
-    linkHrefRegex,
-    maxLinks,
-    maxTextChars,
-    messageRegex,
-    excludeMessageRegex,
-    senderRegex,
-    excludeSenderRegex,
-    maxMessages,
-  })
-
 const wsUrl = relayWebSocketUrl
 const socket = new WebSocket(wsUrl)
 
@@ -183,6 +175,7 @@ let rejectAllPending
 let relaySessionId = null
 let leasedTabId = Number.isInteger(requestedTabId) ? requestedTabId : null
 let relayStatusSnapshot = null
+let cachedExpression = null
 
 function getRelaySource() {
   const observedExtensionVersion = getObservedExtensionVersion()
@@ -298,6 +291,8 @@ function parseArgs(argv) {
     else if (arg === '--timeout' && argv[i + 1]) out.timeout = argv[++i]
     else if (arg === '--selector' && argv[i + 1]) out.selector = argv[++i]
     else if (arg === '--expression' && argv[i + 1]) out.expression = argv[++i]
+    else if (arg === '--expression-file' && argv[i + 1]) out.expressionFile = argv[++i]
+    else if (arg === '--expression-stdin') out.expressionStdin = true
     else if (arg === '--preset' && argv[i + 1]) out.preset = argv[++i]
     else if (arg === '--tab-id' && argv[i + 1]) out.tabId = argv[++i]
     else if (arg === '--pretty' && argv[i + 1]) out.pretty = argv[++i] !== 'false'
@@ -338,6 +333,124 @@ function parseArgs(argv) {
     else if (arg === '--status-timeout-ms' && argv[i + 1]) out.statusTimeoutMs = argv[++i]
   }
   return out
+}
+
+function resolveExpressionInput(parsedOptions) {
+  const expressionSources = []
+
+  if (typeof parsedOptions.expression === 'string') {
+    expressionSources.push('--expression')
+  }
+  const expressionFile = typeof parsedOptions.expressionFile === 'string' ? parsedOptions.expressionFile.trim() : ''
+  if (expressionFile) {
+    expressionSources.push('--expression-file')
+  }
+  if (parsedOptions.expressionStdin === true) {
+    expressionSources.push('--expression-stdin')
+  }
+
+  if (expressionSources.length > 1) {
+    throw new Error(
+      `Conflicting expression inputs: ${expressionSources.join(', ')}. Use only one of --expression, --expression-file, or --expression-stdin.`,
+    )
+  }
+
+  if (typeof parsedOptions.expression === 'string') {
+    return {
+      kind: 'inline',
+      value: parsedOptions.expression,
+    }
+  }
+
+  if (expressionFile) {
+    return {
+      kind: 'file',
+      path: path.resolve(expressionFile),
+    }
+  }
+
+  if (parsedOptions.expressionStdin === true) {
+    return { kind: 'stdin' }
+  }
+
+  return null
+}
+
+function buildDefaultExpression() {
+  return buildBridgeExpression({
+    preset,
+    selector,
+    textRegex,
+    excludeTextRegex,
+    linkTextRegex,
+    linkHrefRegex,
+    maxLinks,
+    maxTextChars,
+    messageRegex,
+    excludeMessageRegex,
+    senderRegex,
+    excludeSenderRegex,
+    maxMessages,
+  })
+}
+
+function readExpressionFile(expressionPath) {
+  try {
+    const expression = fs.readFileSync(expressionPath, 'utf8')
+    if (!expression.trim()) {
+      throw new Error('file is empty')
+    }
+    return expression
+  } catch (error) {
+    throw new Error(
+      `Failed to read --expression-file "${expressionPath}": ${error instanceof Error ? error.message : String(error)}`,
+    )
+  }
+}
+
+function readExpressionFromStdin() {
+  if (process.stdin.isTTY === true) {
+    throw new Error('--expression-stdin requires piped or redirected stdin input')
+  }
+
+  let stdinExpression = ''
+  try {
+    stdinExpression = fs.readFileSync(0, 'utf8')
+  } catch (error) {
+    throw new Error(
+      `Failed to read --expression-stdin input: ${error instanceof Error ? error.message : String(error)}`,
+    )
+  }
+  if (!stdinExpression.trim()) {
+    throw new Error('No expression received on stdin for --expression-stdin')
+  }
+  return stdinExpression
+}
+
+function getResolvedExpression() {
+  if (typeof cachedExpression === 'string') return cachedExpression
+
+  if (!resolvedExpressionInput) {
+    cachedExpression = buildDefaultExpression()
+    return cachedExpression
+  }
+
+  if (resolvedExpressionInput.kind === 'inline') {
+    cachedExpression = resolvedExpressionInput.value
+    return cachedExpression
+  }
+
+  if (resolvedExpressionInput.kind === 'file') {
+    cachedExpression = readExpressionFile(resolvedExpressionInput.path)
+    return cachedExpression
+  }
+
+  if (resolvedExpressionInput.kind === 'stdin') {
+    cachedExpression = readExpressionFromStdin()
+    return cachedExpression
+  }
+
+  throw new Error(`Unsupported expression input kind: ${resolvedExpressionInput.kind}`)
 }
 
 function parsePositiveInt(value, fallback, label) {
@@ -1460,6 +1573,14 @@ function sanitizeStatusTab(value) {
   }
 }
 
+function sanitizeStatusLease(value) {
+  if (!value || typeof value !== 'object') return null
+  return {
+    tabId: Number.isInteger(value.tabId) ? value.tabId : null,
+    sessionId: typeof value.sessionId === 'string' ? value.sessionId : null,
+  }
+}
+
 function summarizeRelayPorts(statusPayload) {
   const rawPorts = Array.isArray(statusPayload?.ports)
     ? statusPayload.ports
@@ -1471,6 +1592,11 @@ function summarizeRelayPorts(statusPayload) {
           queuedControllerCommands: statusPayload?.queuedControllerCommands,
           activeTab: statusPayload?.activeTab,
           attachedTabs: statusPayload?.attachedTabs,
+          attachedLeaseCount: statusPayload?.attachedLeaseCount,
+          leasedTabCount: statusPayload?.leasedTabCount,
+          staleLeaseCount: statusPayload?.staleLeaseCount,
+          tabLeases: statusPayload?.tabLeases,
+          staleTabLeases: statusPayload?.staleTabLeases,
           allowTargetCreate: statusPayload?.allowTargetCreate,
         },
       ]
@@ -1487,8 +1613,21 @@ function summarizeRelayPorts(statusPayload) {
       queuedControllerCommands: Number.isFinite(Number(raw.queuedControllerCommands))
         ? Number(raw.queuedControllerCommands)
         : null,
+      attachedLeaseCount: Number.isFinite(Number(raw.attachedLeaseCount))
+        ? Number(raw.attachedLeaseCount)
+        : null,
+      leasedTabCount: Number.isFinite(Number(raw.leasedTabCount))
+        ? Number(raw.leasedTabCount)
+        : null,
+      staleLeaseCount: Number.isFinite(Number(raw.staleLeaseCount))
+        ? Number(raw.staleLeaseCount)
+        : null,
       activeTab: sanitizeStatusTab(raw.activeTab),
       attachedTabs: Array.isArray(raw.attachedTabs) ? raw.attachedTabs.map(sanitizeStatusTab).filter(Boolean) : [],
+      tabLeases: Array.isArray(raw.tabLeases) ? raw.tabLeases.map(sanitizeStatusLease).filter(Boolean) : [],
+      staleTabLeases: Array.isArray(raw.staleTabLeases)
+        ? raw.staleTabLeases.map(sanitizeStatusLease).filter(Boolean)
+        : [],
       extensionVersion: typeof raw.extensionVersion === 'string' ? raw.extensionVersion : null,
       extensionName: typeof raw.extensionName === 'string' ? raw.extensionName : null,
       extensionCapabilities:
@@ -1536,6 +1675,34 @@ function formatAvailableTabIds(portStatus) {
     .map((entry) => entry.tabId)
     .filter(Number.isInteger)
     .sort((a, b) => a - b)
+    .join(', ')
+}
+
+function formatLeasedTabIds(portStatus) {
+  if (!portStatus || !Array.isArray(portStatus.attachedTabs) || portStatus.attachedTabs.length === 0) return null
+  const leasedIds = portStatus.attachedTabs
+    .filter((entry) => typeof entry.leasedSessionId === 'string' && entry.leasedSessionId.length > 0)
+    .map((entry) => entry.tabId)
+    .filter(Number.isInteger)
+    .sort((a, b) => a - b)
+  return leasedIds.length > 0 ? leasedIds.join(', ') : null
+}
+
+function formatAlternativeTabIds(portStatus, excludedTabId, options = {}) {
+  if (!portStatus || !Array.isArray(portStatus.attachedTabs) || portStatus.attachedTabs.length === 0) return null
+  const filtered = portStatus.attachedTabs
+    .filter((entry) => entry.tabId !== excludedTabId)
+    .filter((entry) => !options.excludeLeased || !entry.leasedSessionId)
+    .map((entry) => entry.tabId)
+    .filter(Number.isInteger)
+    .sort((a, b) => a - b)
+  return filtered.length > 0 ? filtered.join(', ') : null
+}
+
+function formatLeaseSummary(portStatus) {
+  if (!portStatus || !Array.isArray(portStatus.tabLeases) || portStatus.tabLeases.length === 0) return null
+  return portStatus.tabLeases
+    .map((entry) => `${entry.tabId} (${entry.sessionId})`)
     .join(', ')
 }
 
@@ -1640,11 +1807,22 @@ function buildRequestedTabBlocker(snapshot, tabId) {
   const targetTab = findAttachedTabOnPort(targetStatus, tabId)
   if (targetTab) {
     if (targetTab.leasedSessionId && targetTab.leasedSessionId !== relaySessionId) {
+      const otherUnleasedTabIds = formatAlternativeTabIds(targetStatus, tabId, { excludeLeased: true })
+      const otherAttachedTabIds = formatAlternativeTabIds(targetStatus, tabId)
+      const detail = [
+        `Attached tab: ${describeStatusTab(targetTab)}.`,
+        `Current lease owner: ${targetTab.leasedSessionId}.`,
+        otherUnleasedTabIds
+          ? `Other unleased attached tab ids on port ${relayPort}: ${otherUnleasedTabIds}.`
+          : otherAttachedTabIds
+            ? `Other attached tab ids on port ${relayPort} are currently leased or unavailable: ${otherAttachedTabIds}.`
+            : `No other attached tabs are currently available on port ${relayPort}.`,
+      ].join(' ')
       return createBlocker(
         'TAB_LEASED_BY_OTHER_SESSION',
         `Tab ${tabId} is already leased by session ${targetTab.leasedSessionId} on relay port ${relayPort}.`,
-        'Choose another attached tab, or wait for the active controller session to release this lease before retrying.',
-        { retryable: false, detail: describeStatusTab(targetTab) },
+        `Wait for session ${targetTab.leasedSessionId} to release tab ${tabId}, or choose another attached tab from \`npm run relay:status -- --all --status-timeout-ms 3000\` and retry with that \`--tab-id\`.`,
+        { retryable: false, detail },
       )
     }
     return null
@@ -1656,16 +1834,24 @@ function buildRequestedTabBlocker(snapshot, tabId) {
       'TAB_ATTACHED_ON_OTHER_PORT',
       `Tab ${tabId} is attached on relay port ${attachedElsewhere.port}, not ${relayPort}.`,
       `Re-run this command with --port "${attachedElsewhere.port}", or re-attach tab ${tabId} to relay port ${relayPort}.`,
-      { retryable: false, detail: describeStatusTab(attachedElsewhere.tab) },
+      { retryable: false, detail: `Attached tab on relay port ${attachedElsewhere.port}: ${describeStatusTab(attachedElsewhere.tab)}.` },
     )
   }
 
   const availableTabIds = formatAvailableTabIds(targetStatus)
-  const detail = availableTabIds ? `Attached tab ids on port ${relayPort}: ${availableTabIds}.` : null
+  const unleasedTabIds = formatAlternativeTabIds(targetStatus, null, { excludeLeased: true })
+  const leasedTabIds = formatLeasedTabIds(targetStatus)
+  const leaseSummary = formatLeaseSummary(targetStatus)
+  const detail = [
+    availableTabIds ? `Attached tab ids on port ${relayPort}: ${availableTabIds}.` : null,
+    unleasedTabIds ? `Attached tab ids without an active lease: ${unleasedTabIds}.` : null,
+    leasedTabIds ? `Attached tab ids currently leased by another session: ${leasedTabIds}.` : null,
+    leaseSummary ? `Current lease owners on port ${relayPort}: ${leaseSummary}.` : null,
+  ].filter(Boolean).join(' ') || null
   return createBlocker(
     'TAB_NOT_ATTACHED',
     `Tab ${tabId} is not attached on relay port ${relayPort}.`,
-    `Focus tab ${tabId} in Chrome, open the Agent Browser Relay popup, click "Attach this tab", then retry.`,
+    `Focus tab ${tabId} in Chrome and attach it in the popup, or choose another attached tab from \`npm run relay:status -- --all --status-timeout-ms 3000\` before retrying.`,
     { detail },
   )
 }
@@ -1673,6 +1859,7 @@ function buildRequestedTabBlocker(snapshot, tabId) {
 function mapCommandErrorToBlocker(error, snapshot, tabId) {
   const rawMessage = error instanceof Error ? error.message : String(error || 'Relay check failed')
   const message = rawMessage.toLowerCase()
+  const requestedTabBlocker = Number.isInteger(tabId) && snapshot ? buildRequestedTabBlocker(snapshot, tabId) : null
 
   if (message.includes('relay status check failed') || message.includes('relay not reachable')) {
     return createBlocker(
@@ -1682,19 +1869,20 @@ function mapCommandErrorToBlocker(error, snapshot, tabId) {
     )
   }
 
+  if (requestedTabBlocker?.code === 'TAB_LEASED_BY_OTHER_SESSION') {
+    return requestedTabBlocker
+  }
+
   if (message.includes('already leased by session')) {
     return createBlocker(
       'TAB_LEASED_BY_OTHER_SESSION',
       rawMessage,
-      'Choose another attached tab, or wait for the active controller session to release this lease before retrying.',
+      'Inspect `npm run relay:status -- --all --status-timeout-ms 3000`, choose another attached tab, or wait for the active controller session to release this lease before retrying.',
       { retryable: false },
     )
   }
 
-  if (Number.isInteger(tabId)) {
-    const requestedTabBlocker = snapshot ? buildRequestedTabBlocker(snapshot, tabId) : null
-    if (requestedTabBlocker) return requestedTabBlocker
-  }
+  if (requestedTabBlocker) return requestedTabBlocker
 
   if (message.includes('target.createtarget is disabled')) {
     return createBlocker(
@@ -1864,6 +2052,7 @@ async function buildInitialConnectionFailureState() {
 }
 
 async function evaluateWithRecovery() {
+  const expression = getResolvedExpression()
   let lastError
   for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
     try {
@@ -2343,7 +2532,8 @@ function printUsage() {
     [--link-text-regex "pattern"] [--link-href-regex "pattern"]
     [--max-links 20] [--max-text-chars 8000] [--max-messages 500]
     [--check]
-    [--expression "<js>"] [--timeout 3000] [--pretty true|false]
+    [--expression "<js>" | --expression-file "./expr.js" | --expression-stdin]
+    [--timeout 3000] [--pretty true|false]
     [--retries 2] [--retry-delay-ms 400]
 
   --check: performs relay + extension handshake check only and exits.
@@ -2353,8 +2543,10 @@ function printUsage() {
   --screenshot: capture a screenshot via CDP Page.captureScreenshot.
   --screenshot-path: when set, writes the image file and returns its absolute path in JSON.
   --screenshot-full-page: captures full page using Page.getLayoutMetrics.
+  --expression-file: reads a JavaScript expression from a local file.
+  --expression-stdin: reads a JavaScript expression from stdin; prefer this or --expression-file for multi-line or quote-heavy expressions.
 
-Regex controls apply to default and chat-audit extractors unless you pass --expression.
+Regex controls apply to default and chat-audit extractors unless you pass a custom expression via --expression, --expression-file, or --expression-stdin.
 
 Defaults:
 - textRegex / flags: none / ""
@@ -2377,6 +2569,8 @@ Examples:
   node read-active-tab.js --text-regex "order|price" --max-text-chars 2000
   node read-active-tab.js --preset whatsapp-messages --message-regex "invoice|payment" --selector "#main"
   node read-active-tab.js --preset chat-audit --text-regex "hello|hey" --sender-regex "Mathias"
+  node read-active-tab.js --tab-id 123 --expression-file "./tmp/expression.js"
+  cat ./tmp/expression.js | node read-active-tab.js --tab-id 123 --expression-stdin
   node read-active-tab.js --link-text-regex "docs|help" --link-href-regex "grais"
   node read-active-tab.js --screenshot --screenshot-path "./tmp/page.png"
   node read-active-tab.js --screenshot --screenshot-full-page --screenshot-format jpeg --screenshot-quality 80 --screenshot-path "./tmp/page.jpg"
