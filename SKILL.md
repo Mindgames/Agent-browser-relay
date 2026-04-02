@@ -164,8 +164,8 @@ Version compatibility checks are also included under `source.extension`:
 If a mismatch is detected, the command also prints a human-friendly update hint to stderr on every run.
 
 - `scripts/read-active-tab.js` default extraction: `url`, `title`, `text`, `links`, `metaDescription`.
-- Relay session leases (`--tab-id`) for concurrent per-tab scoping on one shared relay/extension instance.
-- `Runtime.evaluate` expression mode with `--expression`.
+- Relay session leases (`--tab-id`) for concurrent agent isolation per tab on one relay port.
+- `Runtime.evaluate` expression mode with `--expression`, `--expression-file`, or `--expression-stdin`.
 - Screenshot capture mode via `--screenshot` (optional `--screenshot-full-page`, `--screenshot-path`).
 - Preset extraction for WhatsApp and generic chat-auditing with regex filters.
 - Attach-state polling with `--check --wait-for-attach`.
@@ -186,12 +186,15 @@ If a mismatch is detected, the command also prints a human-friendly update hint 
 ## Common command examples
 
 In agent workflows, use the `--tab-id` variants. Unscoped commands are for manual/local debugging only.
+Prefer `--expression-file` or `--expression-stdin` over inline `--expression` for non-trivial JavaScript.
 
 ```bash
 node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --pretty false
 node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --tab-id 123 --pretty false
 node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --tab-id 123 --check --wait-for-attach --require-target-create --attach-timeout-ms 120000
 node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --expression "document.documentElement.outerHTML"
+node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --tab-id 123 --expression-file "./tmp/expression.js"
+node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --tab-id 123 --expression-stdin < ./tmp/expression.js
 node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --screenshot --screenshot-full-page --screenshot-path "./tmp/page.png"
 node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --preset whatsapp-messages --max-messages 200 --selector "#main"
 node scripts/read-active-tab.js --preset chat-audit --selector "body" --message-regex ".*"

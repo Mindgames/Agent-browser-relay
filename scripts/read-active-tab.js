@@ -20,6 +20,8 @@ const SKILL_CAPABILITIES = Object.freeze({
     '--screenshot',
     '--screenshot-full-page',
     '--expression',
+    '--expression-file',
+    '--expression-stdin',
     '--preset',
     '--tab-id',
     '--wait-for-attach',
@@ -92,6 +94,14 @@ if (options.help) {
   process.exit(0)
 }
 
+let resolvedExpressionInput = null
+try {
+  resolvedExpressionInput = resolveExpressionInput(options)
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error))
+  process.exit(1)
+}
+
 const relayHost = String(options.host || DEFAULT_HOST).trim() || DEFAULT_HOST
 const relayPort = parsePositiveInt(options.port, DEFAULT_PORT, 'port')
 const relayStatusUrl = `http://${relayHost}:${relayPort}/status`
@@ -152,24 +162,6 @@ const excludeSenderRegex = parseRegexOption(
 )
 const maxMessages = parsePositiveInt(options.maxMessages, DEFAULT_MESSAGE_MAX_MESSAGES, 'max-messages')
 
-const expression =
-  options.expression ||
-  buildBridgeExpression({
-    preset,
-    selector,
-    textRegex,
-    excludeTextRegex,
-    linkTextRegex,
-    linkHrefRegex,
-    maxLinks,
-    maxTextChars,
-    messageRegex,
-    excludeMessageRegex,
-    senderRegex,
-    excludeSenderRegex,
-    maxMessages,
-  })
-
 const wsUrl = relayWebSocketUrl
 const socket = new WebSocket(wsUrl)
 
@@ -182,6 +174,7 @@ let rejectAllPending
 let relaySessionId = null
 let leasedTabId = Number.isInteger(requestedTabId) ? requestedTabId : null
 let relayStatusSnapshot = null
+let cachedExpression = null
 
 function getRelaySource() {
   const observedExtensionVersion = getObservedExtensionVersion()
@@ -294,6 +287,8 @@ function parseArgs(argv) {
     else if (arg === '--timeout' && argv[i + 1]) out.timeout = argv[++i]
     else if (arg === '--selector' && argv[i + 1]) out.selector = argv[++i]
     else if (arg === '--expression' && argv[i + 1]) out.expression = argv[++i]
+    else if (arg === '--expression-file' && argv[i + 1]) out.expressionFile = argv[++i]
+    else if (arg === '--expression-stdin') out.expressionStdin = true
     else if (arg === '--preset' && argv[i + 1]) out.preset = argv[++i]
     else if (arg === '--tab-id' && argv[i + 1]) out.tabId = argv[++i]
     else if (arg === '--pretty' && argv[i + 1]) out.pretty = argv[++i] !== 'false'
@@ -334,6 +329,124 @@ function parseArgs(argv) {
     else if (arg === '--status-timeout-ms' && argv[i + 1]) out.statusTimeoutMs = argv[++i]
   }
   return out
+}
+
+function resolveExpressionInput(parsedOptions) {
+  const expressionSources = []
+
+  if (typeof parsedOptions.expression === 'string') {
+    expressionSources.push('--expression')
+  }
+  const expressionFile = typeof parsedOptions.expressionFile === 'string' ? parsedOptions.expressionFile.trim() : ''
+  if (expressionFile) {
+    expressionSources.push('--expression-file')
+  }
+  if (parsedOptions.expressionStdin === true) {
+    expressionSources.push('--expression-stdin')
+  }
+
+  if (expressionSources.length > 1) {
+    throw new Error(
+      `Conflicting expression inputs: ${expressionSources.join(', ')}. Use only one of --expression, --expression-file, or --expression-stdin.`,
+    )
+  }
+
+  if (typeof parsedOptions.expression === 'string') {
+    return {
+      kind: 'inline',
+      value: parsedOptions.expression,
+    }
+  }
+
+  if (expressionFile) {
+    return {
+      kind: 'file',
+      path: path.resolve(expressionFile),
+    }
+  }
+
+  if (parsedOptions.expressionStdin === true) {
+    return { kind: 'stdin' }
+  }
+
+  return null
+}
+
+function buildDefaultExpression() {
+  return buildBridgeExpression({
+    preset,
+    selector,
+    textRegex,
+    excludeTextRegex,
+    linkTextRegex,
+    linkHrefRegex,
+    maxLinks,
+    maxTextChars,
+    messageRegex,
+    excludeMessageRegex,
+    senderRegex,
+    excludeSenderRegex,
+    maxMessages,
+  })
+}
+
+function readExpressionFile(expressionPath) {
+  try {
+    const expression = fs.readFileSync(expressionPath, 'utf8')
+    if (!expression.trim()) {
+      throw new Error('file is empty')
+    }
+    return expression
+  } catch (error) {
+    throw new Error(
+      `Failed to read --expression-file "${expressionPath}": ${error instanceof Error ? error.message : String(error)}`,
+    )
+  }
+}
+
+function readExpressionFromStdin() {
+  if (process.stdin.isTTY === true) {
+    throw new Error('--expression-stdin requires piped or redirected stdin input')
+  }
+
+  let stdinExpression = ''
+  try {
+    stdinExpression = fs.readFileSync(0, 'utf8')
+  } catch (error) {
+    throw new Error(
+      `Failed to read --expression-stdin input: ${error instanceof Error ? error.message : String(error)}`,
+    )
+  }
+  if (!stdinExpression.trim()) {
+    throw new Error('No expression received on stdin for --expression-stdin')
+  }
+  return stdinExpression
+}
+
+function getResolvedExpression() {
+  if (typeof cachedExpression === 'string') return cachedExpression
+
+  if (!resolvedExpressionInput) {
+    cachedExpression = buildDefaultExpression()
+    return cachedExpression
+  }
+
+  if (resolvedExpressionInput.kind === 'inline') {
+    cachedExpression = resolvedExpressionInput.value
+    return cachedExpression
+  }
+
+  if (resolvedExpressionInput.kind === 'file') {
+    cachedExpression = readExpressionFile(resolvedExpressionInput.path)
+    return cachedExpression
+  }
+
+  if (resolvedExpressionInput.kind === 'stdin') {
+    cachedExpression = readExpressionFromStdin()
+    return cachedExpression
+  }
+
+  throw new Error(`Unsupported expression input kind: ${resolvedExpressionInput.kind}`)
 }
 
 function parsePositiveInt(value, fallback, label) {
@@ -1803,6 +1916,7 @@ async function assertRelayConnectionReady() {
 }
 
 async function evaluateWithRecovery() {
+  const expression = getResolvedExpression()
   let lastError
   for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
     try {
@@ -2280,7 +2394,8 @@ function printUsage() {
     [--link-text-regex "pattern"] [--link-href-regex "pattern"]
     [--max-links 20] [--max-text-chars 8000] [--max-messages 500]
     [--check]
-    [--expression "<js>"] [--timeout 3000] [--pretty true|false]
+    [--expression "<js>" | --expression-file "./expr.js" | --expression-stdin]
+    [--timeout 3000] [--pretty true|false]
     [--retries 2] [--retry-delay-ms 400]
 
   --check: performs relay + extension handshake check only and exits.
@@ -2290,8 +2405,10 @@ function printUsage() {
   --screenshot: capture a screenshot via CDP Page.captureScreenshot.
   --screenshot-path: when set, writes the image file and returns its absolute path in JSON.
   --screenshot-full-page: captures full page using Page.getLayoutMetrics.
+  --expression-file: reads a JavaScript expression from a local file.
+  --expression-stdin: reads a JavaScript expression from stdin; prefer this or --expression-file for multi-line or quote-heavy expressions.
 
-Regex controls apply to default and chat-audit extractors unless you pass --expression.
+Regex controls apply to default and chat-audit extractors unless you pass a custom expression via --expression, --expression-file, or --expression-stdin.
 
 Defaults:
 - textRegex / flags: none / ""
@@ -2314,6 +2431,8 @@ Examples:
   node read-active-tab.js --text-regex "order|price" --max-text-chars 2000
   node read-active-tab.js --preset whatsapp-messages --message-regex "invoice|payment" --selector "#main"
   node read-active-tab.js --preset chat-audit --text-regex "hello|hey" --sender-regex "Mathias"
+  node read-active-tab.js --tab-id 123 --expression-file "./tmp/expression.js"
+  cat ./tmp/expression.js | node read-active-tab.js --tab-id 123 --expression-stdin
   node read-active-tab.js --link-text-regex "docs|help" --link-href-regex "grais"
   node read-active-tab.js --screenshot --screenshot-path "./tmp/page.png"
   node read-active-tab.js --screenshot --screenshot-full-page --screenshot-format jpeg --screenshot-quality 80 --screenshot-path "./tmp/page.jpg"

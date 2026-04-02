@@ -8,6 +8,7 @@ Agent Browser Relay lets your agent control and read from tabs in your real Chro
 - Execute on background/non-focused tabs while you continue using your browser.
 - Keep your real logged-in session (cookies, auth state, extensions) instead of re-automating login in a disposable browser.
 - Extract structured page data, full DOM, screenshots, and chat/message presets via one CLI.
+- Pass complex custom expressions safely via `--expression-file` or `--expression-stdin` instead of fragile shell quoting.
 - Recover from tab/context changes with reconnect + attach checks designed for long-running agent workflows.
 - Stop safely when CAPTCHA/human verification appears, and alert the user before continuing.
 
@@ -163,7 +164,7 @@ Why this matters: the relay extension should be loaded from an `agent-browser-re
 ## Capability library exposed to callers
 
 `read-active-tab.js` includes a machine-readable capability block in each JSON payload (`source.capabilities`), including:
-- CLI switches (`--check`, `--check --require-target-create`, `--metadata`, `--screenshot`, `--expression`, presets, `--tab-id`, etc.)
+- CLI switches (`--check`, `--check --require-target-create`, `--metadata`, `--screenshot`, `--expression`, `--expression-file`, `--expression-stdin`, presets, `--tab-id`, etc.)
 - Relay methods used by the client (`Grais.relay.*`)
 - Bridge methods (`Grais.debugger.*`)
 - Common CDP methods exposed for extraction and screenshots
@@ -278,6 +279,20 @@ Full DOM:
 
 ```bash
 node scripts/read-active-tab.js --tab-id "<TAB_ID>" --expression "document.documentElement.outerHTML" --pretty false
+```
+
+Prefer `--expression-file` or `--expression-stdin` for multi-line or quote-heavy expressions.
+
+Complex custom expression from file:
+
+```bash
+node scripts/read-active-tab.js --tab-id "<TAB_ID>" --expression-file "./tmp/expression.js" --pretty false
+```
+
+Complex custom expression from stdin:
+
+```bash
+node scripts/read-active-tab.js --tab-id "<TAB_ID>" --expression-stdin --pretty false < ./tmp/expression.js
 ```
 
 Screenshot:
