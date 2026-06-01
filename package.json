@@ -1,7 +1,25 @@
 {
   "name": "agent-browser-relay",
-  "private": true,
   "version": "0.0.13",
+  "description": "Chrome extension and local relay for tab-scoped agent browser reads.",
+  "license": "MIT",
+  "packageManager": "pnpm@10.33.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Mindgames/Agent-browser-relay.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Mindgames/Agent-browser-relay/issues"
+  },
+  "homepage": "https://github.com/Mindgames/Agent-browser-relay#readme",
+  "keywords": [
+    "ai-agents",
+    "browser-relay",
+    "chrome-extension",
+    "codex",
+    "devtools-protocol",
+    "browser-automation"
+  ],
   "bin": {
     "agent-browser-relay": "relay-server.js"
   },
@@ -10,9 +28,10 @@
     "extension:install": "node scripts/extension-install-helper.js",
     "extension:path": "node scripts/extension-install-helper.js --paths",
     "extension:status": "node scripts/extension-status.js",
-    "lint": "node --check relay-server.js extension/background.js extension/options.js extension/popup.js scripts/extension-status.js scripts/read-active-tab.js scripts/relay-manager.js scripts/relay-service.js",
+    "lint": "node --check relay-server.js extension/background.js extension/options.js extension/popup.js scripts/extension-status.js scripts/read-active-tab.js scripts/relay-manager.js scripts/relay-service.js tests/contract.test.js",
     "knip": "node -e \"console.log('knip: not configured for this repository; skipped')\"",
-    "build": "node --check relay-server.js extension/background.js extension/options.js extension/popup.js scripts/extension-status.js scripts/read-active-tab.js scripts/relay-manager.js scripts/relay-service.js",
+    "build": "node --check relay-server.js extension/background.js extension/options.js extension/popup.js scripts/extension-status.js scripts/read-active-tab.js scripts/relay-manager.js scripts/relay-service.js tests/contract.test.js",
+    "test": "node --test tests/*.test.js",
     "start": "node relay-server.js",
     "start:relay": "node relay-server.js",
     "relay:start": "node scripts/relay-manager.js start",

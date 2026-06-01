@@ -1,1 +1,8 @@
 .DS_Store
+node_modules/
+tmp/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*

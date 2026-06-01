@@ -25,6 +25,17 @@ Release history lives in [`CHANGELOG.md`](./CHANGELOG.md).
 - Explicit tab leasing model for multi-agent safety on shared relay infrastructure.
 - Detected host-browser identity in relay status so you can distinguish Chrome, Edge, Brave-style hosts and separate browser profiles.
 
+## Why This Matters for Maintainers
+
+Open-source maintainers often need agents to inspect authenticated product pages, release dashboards, bug reports, logs, or admin surfaces without handing over an entire browser profile. Agent Browser Relay gives that workflow a narrow control plane:
+
+- Humans choose the tab from the extension popup before an agent can read it.
+- Agents must pass `--tab-id` so each run is scoped to a specific attached tab lease.
+- `relay:doctor` makes readiness failures deterministic instead of leaving agents to guess.
+- The relay returns structured source metadata so maintainers can audit which local relay, browser profile, and tab produced the evidence.
+
+The project is intentionally small: Chrome extension, local relay, and CLI contracts that can be reviewed and tested without a hosted service.
+
 ## Concurrency Model
 
 - Multiple tabs can be attached at the same time.
@@ -433,5 +444,9 @@ If CAPTCHA/human verification appears, stop immediately, alert the user, and wai
 ## Recommended Companion
 
 For human-in-the-loop workflows, we recommend using [attention-please](https://github.com/Mindgames/attention-please) so the user gets an immediate alert when manual action is needed (for example CAPTCHA or verification gates).
+
+## License
+
+MIT.
 
 Made by Mathias Asberg: [GitHub](https://github.com/Mindgames), [X](https://x.com/mathiiias123), [LinkedIn](https://www.linkedin.com/in/imathias/).
