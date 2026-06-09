@@ -10,11 +10,12 @@ This repository provides a local browser-relay so an agent can attach to a **cho
 ## Capabilities
 - Attach or detach the chosen tab from the toolbar popup.
 - Keep multiple tabs attached concurrently in one extension instance.
+- Keep multiple browser/profile extension clients connected concurrently on one relay port.
 - Recover/reconnect when tab context changes.
 - Spawn a new background tab via CDP (`Target.createTarget`) and auto-attach it through the extension bridge.
 - Execute JavaScript in-page via CDP (`Runtime.evaluate`).
 - Capture screenshots from the attached tab (`--screenshot`, optional `--screenshot-full-page`).
-- Relay session/lease isolation for multi-agent workflows (`--tab-id`).
+- Relay session/lease isolation for multi-agent workflows (`--tab-id`, `--tab-ref`).
 - Default extraction payload: `url`, `title`, `text`, `links`, `metaDescription`.
 - Full DOM extraction with custom expression (e.g. `document.documentElement.outerHTML`).
 - WhatsApp chat extraction using the `--preset whatsapp-messages` mode.
@@ -124,12 +125,14 @@ This refreshes sparse state and restores all missing tracked directories in the 
      - Open/focus the target tab in Chrome.
      - Open the toolbar popup and click **Attach this tab** so the badge shows `ON`.
    - The agent must wait for human confirmation before continuing.
-   - Resolve the target `tabId` from relay status (`/status` or `npm run relay:status -- --all --status-timeout-ms 3000`).
+   - Resolve the target `tabId` or `tabRef` from relay status (`/status` or `npm run relay:status -- --all --status-timeout-ms 3000`).
    - Before any read, the agent must run:
 
    ```bash
    npm run relay:doctor -- --host "127.0.0.1" --port "18793" --tab-id "<TAB_ID>" --json
    ```
+
+   Use `--tab-ref "<TAB_REF>"` instead when multiple browsers expose the same numeric tab id.
 
    If the workflow will open new tabs via `Target.createTarget`, also run:
 
@@ -139,7 +142,14 @@ This refreshes sparse state and restores all missing tracked directories in the 
 
    Continue only when this check succeeds.
 
-### Per-tab relay port behavior
+### Multi-browser behavior
+- One relay port supports multiple connected browser/profile extension clients.
+- Relay status exposes connected `browsers[]` and browser-scoped attached tab refs.
+- Attached tabs include `tabRef` formatted as `browserId:tabId`.
+- Use `--tab-id` when the numeric tab id is unambiguous; use `--tab-ref` when multiple browsers may expose the same numeric tab id.
+- If multiple browsers allow `Target.createTarget`, use `--browser-id` to choose the browser.
+
+### Advanced per-tab relay port behavior
 - If you start relay on multiple ports, one extension install can manage different ports by tab.
 - If a tab has no saved relay-port mapping, it uses the global default relay port (`18793`).
 - On successful attach, the extension stores that tab’s relay port mapping.
@@ -166,12 +176,12 @@ This refreshes sparse state and restores all missing tracked directories in the 
 - If the current working directory is not the installed skill root, agent must use the stable absolute `read-active-tab.js` path printed by `npm run extension:path` instead of assuming `node scripts/read-active-tab.js` is valid from the current cwd.
 - After relay startup (`relay:global:start` / `relay:global:install` or `relay:start`), agent must stop and ask the human to open the popup once, then run `npm run extension:status -- --wait-for-connected --connected-timeout-ms 120000`.
 - Only after `extension:status` succeeds may the agent either ask the human to attach the target tab, or rely on enabled target-create permission for first-tab creation workflows.
-- Agent must run `npm run relay:doctor -- --host "127.0.0.1" --port "18793" --tab-id "<TAB_ID>" --json` before any data read and continue only on success.
+- Agent must run `npm run relay:doctor -- --host "127.0.0.1" --port "18793" --tab-id "<TAB_ID>" --json` or `npm run relay:doctor -- --host "127.0.0.1" --port "18793" --tab-ref "<TAB_REF>" --json` before any data read and continue only on success.
 - For workflows that create tabs with `Target.createTarget`, agent must additionally require target-create readiness via `--require-target-create`.
 - When target-create readiness succeeds, the extension may create and auto-attach the first agent-controlled tab for that session even when no tab lease exists yet.
-- For all agent runs (single-agent and concurrent), agent must use tab leasing by setting `--tab-id <tabId>` on all read/check commands.
-- Agent must resolve `tabId` from relay status (`/status` or `npm run relay:status -- --all`) and explicitly target that tab.
-- If the requested `tabId` is not present in status `attachedTabs`, agent must stop and ask the human to re-attach that tab before continuing.
+- For all agent runs (single-agent and concurrent), agent must use tab leasing by setting `--tab-id <tabId>` or `--tab-ref <browserId:tabId>` on all read/check commands.
+- Agent must resolve `tabId` or `tabRef` from relay status (`/status` or `npm run relay:status -- --all`) and explicitly target that tab.
+- If the requested `tabId`/`tabRef` is not present in status `attachedTabs`, agent must stop and ask the human to re-attach that tab before continuing.
 - Agent must not stop/restart relay during a task unless the human explicitly asks for restart or a hard failure requires it.
 - Agent must not restart relay only because local code changed. Code updates are picked up only on explicit human-approved restart.
 - If the page shows human-verification gates (for example "Are you human?" or CAPTCHA), agent must stop immediately, alert the human with [$attention-please](/Users/mathiasasberg/.codex/skills/public/attention-please/SKILL.md), and wait for explicit human confirmation before continuing.
@@ -205,7 +215,7 @@ Never run bare `curl` without a timeout for relay checks.
 
    If relay is reachable this command returns a structured blocker with the next action instead of a generic attach timeout.
 
-   Agent safety note: autonomous runs must use commands that include `--tab-id "<TAB_ID>"`. Unscoped variants below are manual/debug-only.
+   Agent safety note: autonomous runs must use commands that include `--tab-id "<TAB_ID>"` or `--tab-ref "<TAB_REF>"`. Unscoped variants below are manual/debug-only.
 
 6. Read default extraction from a specific leased tab:
 
@@ -273,7 +283,8 @@ Never run bare `curl` without a timeout for relay checks.
 - `--wait-for-attach` waits for the bridge and tab attachment before running reads.
 - `--attach-timeout-ms <ms>` controls the max wait time (default: `120000`).
 - `--attach-poll-ms <ms>` controls retry frequency (default: `500`).
-- `--tab-id <id>` enables relay session lease routing so each agent is isolated to a specific tab.
+- `--tab-id <id>` enables relay session lease routing when the numeric tab id is unambiguous.
+- `--tab-ref <browserId:tabId>` enables relay session lease routing for a specific browser/profile tab.
 
 When check/read succeeds, payload includes:
 `source.relayHost`, `source.relayPort`, `source.relayStatusUrl`, and `source.relayWebSocketUrl` so humans can confirm the active relay endpoint.

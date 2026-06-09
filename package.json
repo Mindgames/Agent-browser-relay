@@ -1,6 +1,6 @@
 {
   "name": "agent-browser-relay",
-  "version": "0.0.13",
+  "version": "0.0.14",
   "description": "Chrome extension and local relay for tab-scoped agent browser reads.",
   "license": "MIT",
   "packageManager": "pnpm@10.33.0",

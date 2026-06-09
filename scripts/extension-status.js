@@ -61,6 +61,7 @@ async function main() {
     extensionVersion: status.extensionVersion,
     extensionName: status.extensionName,
     browser: status.browser,
+    browsers: status.browsers,
     primaryExtensionPath: installBundle.path,
     primaryPathKind: installBundle.pathKind,
     visibleExtensionPath: installBundle.visiblePath,
@@ -146,6 +147,13 @@ async function getExtensionConnectionStatus() {
       extensionVersion: typeof targetPort?.extensionVersion === 'string' ? targetPort.extensionVersion : null,
       extensionName: typeof targetPort?.extensionName === 'string' ? targetPort.extensionName : null,
       browser: sanitizeBrowserIdentity(targetPort?.browser),
+      browsers: Array.isArray(targetPort?.browsers)
+        ? targetPort.browsers.map((entry) => ({
+            browserId: typeof entry?.browserId === 'string' ? entry.browserId : null,
+            browser: sanitizeBrowserIdentity(entry?.browser),
+            attachedTabCount: Number.isFinite(Number(entry?.attachedTabCount)) ? Number(entry.attachedTabCount) : 0,
+          })).filter((entry) => entry.browserId || entry.browser)
+        : [],
       error: null,
     }
   } catch (error) {
@@ -158,13 +166,14 @@ async function getExtensionConnectionStatus() {
       extensionVersion: null,
       extensionName: null,
       browser: null,
+      browsers: [],
       error: `Relay is not reachable at ${relayStatusUrl}: ${error instanceof Error ? error.message : String(error)}`,
     }
   }
 }
 
 function printSummary(payload) {
-  console.log('Primary Chrome extension path:')
+  console.log('Primary extension path:')
   console.log(`  ${payload.primaryExtensionPath}`)
   console.log(`Primary path source: ${describePrimaryPath(payload.primaryPathKind)}`)
   console.log(`Relay status URL: ${payload.relayStatusUrl}`)
@@ -178,11 +187,18 @@ function printSummary(payload) {
 
   if (payload.extensionConnected) {
     const browserLabel = formatBrowserIdentity(payload.browser)
-    console.log(
-      browserLabel
-        ? `Relay status: extension connected on port ${payload.port} via ${browserLabel}`
-        : `Relay status: Chrome extension connected on port ${payload.port}`,
-    )
+    const browsers = Array.isArray(payload.browsers) ? payload.browsers : []
+    let statusLine = `Relay status: extension connected on port ${payload.port}`
+    if (browsers.length > 1) {
+      statusLine = `Relay status: ${browsers.length} browser extensions connected on port ${payload.port}`
+    } else if (browserLabel) {
+      statusLine = `Relay status: extension connected on port ${payload.port} via ${browserLabel}`
+    }
+    console.log(statusLine)
+    for (const entry of browsers) {
+      const label = formatBrowserIdentity(entry.browser) || entry.browserId || 'unknown browser'
+      console.log(`Connected browser: ${label} (${entry.attachedTabCount} attached tab${entry.attachedTabCount === 1 ? '' : 's'})`)
+    }
     if (payload.extensionLastSeenAgoMs !== null) {
       console.log(`Last heartbeat: ${payload.extensionLastSeenAgoMs}ms ago`)
     }
@@ -195,12 +211,12 @@ function printSummary(payload) {
     return
   }
 
-  console.log(`Relay status: Chrome extension is not connected on port ${payload.port}`)
+  console.log(`Relay status: browser extension is not connected on port ${payload.port}`)
   if (payload.extensionPorts.length > 0) {
     console.log(`Extension is currently connected on other relay port(s): ${payload.extensionPorts.join(', ')}`)
   }
-  console.log('This means Chrome has not confirmed the extension in the current browser profile yet, or the popup has not been opened since relay startup.')
-  console.log('Open Chrome, verify Agent Browser Relay is enabled, then open the toolbar popup once.')
+  console.log('This means the browser has not confirmed the extension in the current profile yet, or the popup has not been opened since relay startup.')
+  console.log('Open the browser, verify Agent Browser Relay is enabled, then open the toolbar popup once.')
   console.log('The popup now wakes the extension and should show a relay-connected status when the load is confirmed.')
   console.log('If this is first run and the extension is missing from Chrome, load unpacked from the primary path above.')
   console.log('Re-run this command, or use `npm run extension:status -- --wait-for-connected --connected-timeout-ms 120000`.')

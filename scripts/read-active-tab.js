@@ -24,6 +24,8 @@ const SKILL_CAPABILITIES = Object.freeze({
     '--expression-stdin',
     '--preset',
     '--tab-id',
+    '--tab-ref',
+    '--browser-id',
     '--wait-for-attach',
   ],
   relayMethods: [
@@ -142,7 +144,11 @@ const screenshotTimeoutMs = parsePositiveInt(
   'screenshot-timeout-ms',
 )
 const preset = String(options.preset || DEFAULT_PRESET).trim().toLowerCase()
-const requestedTabId = parseOptionalTabId(options.tabId || process.env.GRAIS_TAB_ID, 'tab-id')
+const requestedTabRef = parseOptionalTabRef(options.tabRef || process.env.GRAIS_TAB_REF)
+const requestedBrowserId = parseOptionalBrowserId(options.browserId || process.env.GRAIS_BROWSER_ID)
+const requestedTabId = parseOptionalTabId(options.tabId || process.env.GRAIS_TAB_ID, 'tab-id') || requestedTabRef?.tabId || null
+const requestedTabRefValue = requestedTabRef?.tabRef || (requestedBrowserId && Number.isInteger(requestedTabId) ? `${requestedBrowserId}:${requestedTabId}` : null)
+const hasRequestedTabTarget = Boolean(requestedTabRefValue || Number.isInteger(requestedTabId))
 
 const textRegex = parseRegexOption('text-regex', options.textRegex, options.textRegexFlags)
 const excludeTextRegex = parseRegexOption('exclude-text-regex', options.excludeTextRegex, options.excludeTextRegexFlags)
@@ -174,6 +180,8 @@ let socketOpenedOnce = false
 let rejectAllPending
 let relaySessionId = null
 let leasedTabId = Number.isInteger(requestedTabId) ? requestedTabId : null
+let leasedTabRef = requestedTabRefValue
+let leasedBrowserId = requestedTabRef?.browserId || requestedBrowserId || null
 let relayStatusSnapshot = null
 let cachedExpression = null
 
@@ -191,7 +199,9 @@ function getRelaySource() {
     relayStatusUrl,
     relayWebSocketUrl,
     relaySessionId,
+    tabRef: leasedTabRef || null,
     tabId: Number.isInteger(leasedTabId) ? leasedTabId : null,
+    browserId: leasedBrowserId || null,
     capabilities: SKILL_CAPABILITIES,
     browser: observedBrowser,
     extension: {
@@ -311,6 +321,8 @@ function parseArgs(argv) {
     else if (arg === '--expression-stdin') out.expressionStdin = true
     else if (arg === '--preset' && argv[i + 1]) out.preset = argv[++i]
     else if (arg === '--tab-id' && argv[i + 1]) out.tabId = argv[++i]
+    else if (arg === '--tab-ref' && argv[i + 1]) out.tabRef = argv[++i]
+    else if (arg === '--browser-id' && argv[i + 1]) out.browserId = argv[++i]
     else if (arg === '--pretty' && argv[i + 1]) out.pretty = argv[++i] !== 'false'
     else if (arg === '--wait-for-attach') out.waitForAttach = true
     else if (arg === '--require-target-create') out.requireTargetCreate = true
@@ -492,6 +504,29 @@ function parseOptionalTabId(value, label = 'tab-id') {
     throw new Error(`Invalid ${label}: ${String(value)} (must be positive integer)`)
   }
   return parsed
+}
+
+function parseOptionalBrowserId(value) {
+  if (value === undefined || value === null || String(value).trim() === '') return null
+  const normalized = String(value).trim().replace(/[^a-zA-Z0-9_.-]/g, '_')
+  if (!normalized) throw new Error(`Invalid browser-id: ${String(value)}`)
+  return normalized
+}
+
+function parseOptionalTabRef(value) {
+  if (value === undefined || value === null || String(value).trim() === '') return null
+  const raw = String(value).trim()
+  const splitAt = raw.lastIndexOf(':')
+  if (splitAt <= 0 || splitAt === raw.length - 1) {
+    throw new Error(`Invalid tab-ref: ${raw} (expected browserId:tabId)`)
+  }
+  const browserId = parseOptionalBrowserId(raw.slice(0, splitAt))
+  const tabId = parseOptionalTabId(raw.slice(splitAt + 1), 'tab-ref tab id')
+  return {
+    browserId,
+    tabId,
+    tabRef: `${browserId}:${tabId}`,
+  }
 }
 
 function parseRegexOption(label, pattern, flags) {
@@ -1412,46 +1447,73 @@ function sendRelayCommand(method, params, timeout = timeoutMs) {
   if (Number.isInteger(leasedTabId)) {
     relayParams.tabId = leasedTabId
   }
+  if (leasedTabRef) {
+    relayParams.tabRef = leasedTabRef
+  }
+  if (leasedBrowserId) {
+    relayParams.browserId = leasedBrowserId
+  }
   return sendRelayRequest('forwardCDPCommand', relayParams, timeout)
+}
+
+function requestedRelayTargetParams() {
+  return {
+    ...(requestedTabRefValue ? { tabRef: requestedTabRefValue } : {}),
+    ...(requestedBrowserId ? { browserId: requestedBrowserId } : {}),
+    ...(Number.isInteger(requestedTabId) ? { tabId: requestedTabId } : {}),
+  }
+}
+
+function rememberLease(result) {
+  if (!result || typeof result !== 'object') return
+  if (typeof result.tabRef === 'string' && result.tabRef.trim()) {
+    leasedTabRef = result.tabRef.trim()
+  }
+  if (typeof result.browserId === 'string' && result.browserId.trim()) {
+    leasedBrowserId = result.browserId.trim()
+  } else if (leasedTabRef) {
+    const parsed = parseOptionalTabRef(leasedTabRef)
+    leasedBrowserId = parsed?.browserId || leasedBrowserId
+  }
+  if (Number.isInteger(result.tabId)) {
+    leasedTabId = result.tabId
+  }
 }
 
 async function ensureRelaySession() {
   if (relaySessionId) return relaySessionId
   const openResult = await sendRelayRequest('Grais.relay.openSession', {
     client: 'read-active-tab',
-    ...(Number.isInteger(requestedTabId) ? { tabId: requestedTabId } : {}),
+    ...requestedRelayTargetParams(),
   })
   if (!openResult || openResult.ok === false || typeof openResult.sessionId !== 'string') {
     throw new Error(openResult?.error || 'Failed to open relay session')
   }
   relaySessionId = openResult.sessionId
-  if (Number.isInteger(openResult.tabId)) {
-    leasedTabId = openResult.tabId
-  }
+  rememberLease(openResult)
   return relaySessionId
 }
 
-async function ensureRelayTabLease(tabId) {
-  const requested = parseOptionalTabId(tabId, 'tab-id')
-  if (!requested) return null
+async function ensureRelayTargetLease() {
+  if (!hasRequestedTabTarget) return null
   await ensureRelaySession()
   const claimResult = await sendRelayRequest('Grais.relay.claimTab', {
     sessionId: relaySessionId,
-    tabId: requested,
+    ...requestedRelayTargetParams(),
   })
   if (!claimResult || claimResult.ok === false) {
-    throw new Error(claimResult?.error || `Failed to claim tab lease for tab ${requested}`)
+    throw new Error(claimResult?.error || 'Failed to claim tab lease')
   }
-  leasedTabId = requested
-  return requested
+  rememberLease(claimResult)
+  return leasedTabRef || leasedTabId
 }
 
 async function prepareTargetTabForCommand() {
-  if (Number.isInteger(requestedTabId)) {
-    await ensureRelayTabLease(requestedTabId)
+  if (hasRequestedTabTarget) {
+    await ensureRelayTargetLease()
     const attachResult = await sendRelayCommand('Grais.debugger.attachTab', { tabId: requestedTabId })
     if (attachResult && attachResult.ok === false) {
-      throw new Error(attachResult.error || `Failed to attach tab ${requestedTabId}`)
+      throw new Error(attachResult.error || `Failed to attach tab ${leasedTabRef || requestedTabId}`)
     }
     return
   }
@@ -1580,6 +1642,9 @@ function sanitizeStatusTab(value) {
   if (!value || typeof value !== 'object') return null
   return {
     tabId: Number.isInteger(value.tabId) ? value.tabId : null,
+    tabRef: typeof value.tabRef === 'string' ? value.tabRef : null,
+    browserId: typeof value.browserId === 'string' ? value.browserId : null,
+    browser: sanitizeBrowserIdentity(value.browser),
     url: typeof value.url === 'string' ? value.url : null,
     title: typeof value.title === 'string' ? value.title : null,
     windowId: Number.isInteger(value.windowId) ? value.windowId : null,
@@ -1593,6 +1658,8 @@ function sanitizeStatusLease(value) {
   if (!value || typeof value !== 'object') return null
   return {
     tabId: Number.isInteger(value.tabId) ? value.tabId : null,
+    tabRef: typeof value.tabRef === 'string' ? value.tabRef : null,
+    browserId: typeof value.browserId === 'string' ? value.browserId : null,
     sessionId: typeof value.sessionId === 'string' ? value.sessionId : null,
   }
 }
@@ -1691,6 +1758,7 @@ function findAttachedTabAcrossPorts(snapshot, tabId) {
 function describeStatusTab(tab) {
   if (!tab) return 'unknown tab'
   const parts = []
+  if (tab.tabRef) parts.push(`[${tab.tabRef}]`)
   if (tab.title) parts.push(tab.title)
   if (tab.url) parts.push(tab.url)
   if (parts.length === 0) return `tab ${tab.tabId || 'unknown'}`
@@ -2013,8 +2081,8 @@ async function ensureMetadataReadyForCommand() {
     throw createReadinessErrorFromState(buildBlockedCheckResult(relay, extension, requestedTabBlocker))
   }
 
-  if (Number.isInteger(requestedTabId)) {
-    await ensureRelayTabLease(requestedTabId)
+  if (hasRequestedTabTarget) {
+    await ensureRelayTargetLease()
   }
 }
 
@@ -2121,7 +2189,7 @@ async function checkBridge() {
     connected: false,
     error: null,
   }
-  const allowTablessTargetCreateCheck = requireTargetCreate && !Number.isInteger(requestedTabId)
+  const allowTablessTargetCreateCheck = requireTargetCreate && !hasRequestedTabTarget
   let snapshot = null
 
   try {
@@ -2193,11 +2261,11 @@ async function checkBridge() {
     }
 
     try {
-      if (Number.isInteger(requestedTabId)) {
-        await ensureRelayTabLease(requestedTabId)
+      if (hasRequestedTabTarget) {
+        await ensureRelayTargetLease()
         const attachResult = await sendRelayCommand('Grais.debugger.attachTab', { tabId: requestedTabId })
         if (attachResult && attachResult.ok === false) {
-          throw new Error(attachResult.error || `Tab ${requestedTabId} attachment is not ready`)
+          throw new Error(attachResult.error || `Tab ${leasedTabRef || requestedTabId} attachment is not ready`)
         }
       } else {
         const attachResult = await sendRelayCommand('Grais.debugger.ensureActiveTab')
@@ -2214,13 +2282,13 @@ async function checkBridge() {
       if (!pingResult) {
         throw new Error(
           Number.isInteger(requestedTabId)
-            ? `No response from tab ${requestedTabId} through relay bridge`
+            ? `No response from tab ${leasedTabRef || requestedTabId} through relay bridge`
             : 'No response from relay bridge',
         )
       }
       extension.connected = true
     } catch (ensureError) {
-      if (!Number.isInteger(requestedTabId)) {
+      if (!hasRequestedTabTarget) {
         const pingResult = await sendRelayCommand('Runtime.evaluate', {
           expression: '1 + 1',
           returnByValue: true,
@@ -2414,7 +2482,7 @@ async function main() {
     }
 
     if (checkOnly) {
-      if (waitForAttach && attachTimeoutMs > 0 && !(requireTargetCreate && !Number.isInteger(requestedTabId))) {
+      if (waitForAttach && attachTimeoutMs > 0 && !(requireTargetCreate && !hasRequestedTabTarget)) {
         await waitForAttachmentReady({ timeoutMs: attachTimeoutMs, pollMs: attachPollMs })
       }
       const status = await checkBridge()
@@ -2548,6 +2616,8 @@ function printUsage() {
   console.log(`Usage:
   node read-active-tab.js [--host 127.0.0.1] [--port 18793] [--selector "body"] [--preset "default|whatsapp|whatsapp-messages|wa|chat-audit|chat"]
     [--tab-id 123]
+    [--tab-ref browserId:123]
+    [--browser-id browserId]
     [--wait-for-attach] [--attach-timeout-ms 120000] [--attach-poll-ms 500]
     [--require-target-create]
     [--status-timeout-ms 1200]
@@ -2566,7 +2636,9 @@ function printUsage() {
 
   --check: performs relay + extension handshake check only and exits.
   --require-target-create: with --check, fails unless Target.createTarget is enabled in popup settings; can be used without --tab-id for first-tab creation workflows.
-  --tab-id: binds this run to a specific Chrome tab id using a relay session lease.
+  --tab-id: binds this run to a specific tab id using a relay session lease.
+  --tab-ref: binds this run to a browser-scoped tab ref from relay status, formatted as browserId:tabId.
+  --browser-id: targets a specific connected browser/profile, mainly for Target.createTarget or disambiguation.
   --metadata: fetches active tab URL/title metadata without forcing DOM attach.
   --screenshot: capture a screenshot via CDP Page.captureScreenshot.
   --screenshot-path: when set, writes the image file and returns its absolute path in JSON.
@@ -2598,6 +2670,7 @@ Examples:
   node read-active-tab.js --preset whatsapp-messages --message-regex "invoice|payment" --selector "#main"
   node read-active-tab.js --preset chat-audit --text-regex "hello|hey" --sender-regex "Mathias"
   node read-active-tab.js --tab-id 123 --expression-file "./tmp/expression.js"
+  node read-active-tab.js --tab-ref chrome-profile:123 --expression-file "./tmp/expression.js"
   cat ./tmp/expression.js | node read-active-tab.js --tab-id 123 --expression-stdin
   node read-active-tab.js --link-text-regex "docs|help" --link-href-regex "grais"
   node read-active-tab.js --screenshot --screenshot-path "./tmp/page.png"

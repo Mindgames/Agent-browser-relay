@@ -10,10 +10,17 @@ const attachButton = document.getElementById('attach')
 const refreshButton = document.getElementById('refresh')
 const openExtensionTabButton = document.getElementById('openExtensionTab')
 const allowCreateTargetToggle = document.getElementById('allowCreateTarget')
+const versionEl = document.getElementById('version')
 
 function setStatus(message) {
   if (!statusEl) return
   statusEl.textContent = message || ''
+}
+
+function renderVersion() {
+  if (!versionEl || typeof chrome?.runtime?.getManifest !== 'function') return
+  const manifest = chrome.runtime.getManifest()
+  versionEl.textContent = manifest?.version ? `v${manifest.version}` : ''
 }
 
 function setRoutingExpanded(expanded) {
@@ -307,4 +314,5 @@ attachButton?.addEventListener('click', () => void onToggleAttach())
 allowCreateTargetToggle?.addEventListener('change', () => void onToggleAllowCreateTarget())
 
 setRoutingExpanded(false)
+renderVersion()
 void refresh()
