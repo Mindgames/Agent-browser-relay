@@ -6,16 +6,17 @@ Use it when an agent needs page text, links, DOM, screenshots, or selected brows
 
 ## How It Works
 
-1. A Chrome extension lets you attach the tab you want the agent to use.
+1. A Chrome or Chromium extension lets you attach the tab you want the agent to use.
 2. A local relay runs on `127.0.0.1:18793`.
-3. The agent calls the relay with a specific `--tab-id`.
-4. The relay reads only that attached tab and returns JSON.
+3. One relay port can keep multiple browser/profile extension clients connected at once.
+4. The agent calls the relay with a specific `--tab-id` or browser-scoped `--tab-ref`.
+5. The relay reads only that attached tab and returns JSON.
 
 The important safety rule is simple: no attached tab, no read.
 
 ## Requirements
 
-- Google Chrome
+- Google Chrome or another Chromium browser that can load unpacked extensions
 - Node.js 20 or newer
 - `pnpm`
 - macOS or Linux for the global background relay service
@@ -83,11 +84,11 @@ pnpm extension:status -- --wait-for-connected --connected-timeout-ms 120000
 
 ## Attach A Tab
 
-1. Open the target page in Chrome.
+1. Open the target page in Chrome, Brave, Edge, or another Chromium browser.
 2. Click the **Agent Browser Relay** toolbar icon.
 3. Click **Attach this tab**.
 4. Confirm the badge shows `ON`.
-5. Copy the tab id from the popup, or get it from:
+5. Copy the tab id from the popup, or get the tab id / tab ref from:
 
 ```bash
 pnpm relay:status -- --all --status-timeout-ms 3000
@@ -95,12 +96,18 @@ pnpm relay:status -- --all --status-timeout-ms 3000
 
 ## Read A Tab
 
-Replace `<TAB_ID>` with the attached tab id.
+Replace `<TAB_ID>` with the attached tab id. If more than one browser is connected and tab ids collide, use `<TAB_REF>` from `relay:status` instead. A tab ref is `browserId:tabId`.
 
 Run the readiness check first:
 
 ```bash
 pnpm relay:doctor -- --host "127.0.0.1" --port "18793" --tab-id "<TAB_ID>" --json
+```
+
+Or target a specific browser tab ref:
+
+```bash
+pnpm relay:doctor -- --host "127.0.0.1" --port "18793" --tab-ref "<TAB_REF>" --json
 ```
 
 Read the default page payload:
@@ -110,6 +117,16 @@ node scripts/read-active-tab.js \
   --host "127.0.0.1" \
   --port "18793" \
   --tab-id "<TAB_ID>" \
+  --pretty false
+```
+
+For duplicate tab ids across browsers:
+
+```bash
+node scripts/read-active-tab.js \
+  --host "127.0.0.1" \
+  --port "18793" \
+  --tab-ref "<TAB_REF>" \
   --pretty false
 ```
 
@@ -157,7 +174,7 @@ The agent should:
 
 1. Check relay status.
 2. Confirm the requested tab is attached.
-3. Run `relay:doctor` for that `--tab-id`.
+3. Run `relay:doctor` for that `--tab-id` or `--tab-ref`.
 4. Read only that tab.
 
 ## Agent Safety Contract
@@ -167,7 +184,9 @@ Agents must use the local relay gateway only:
 - `/status`
 - `pnpm relay:status -- --all --status-timeout-ms 3000`
 - `pnpm relay:doctor -- --tab-id "<TAB_ID>" --json`
+- `pnpm relay:doctor -- --tab-ref "<TAB_REF>" --json`
 - `node scripts/read-active-tab.js --tab-id "<TAB_ID>"`
+- `node scripts/read-active-tab.js --tab-ref "<TAB_REF>"`
 
 Agents must not use Playwright, Puppeteer, Selenium, ad-hoc Chrome scripts, or a random Chrome profile for this workflow.
 
@@ -205,7 +224,7 @@ Tab is not attached:
 1. Focus the tab in Chrome.
 2. Open the extension popup.
 3. Click **Attach this tab** again.
-4. Re-run `pnpm relay:doctor -- --tab-id "<TAB_ID>" --json`.
+4. Re-run `pnpm relay:doctor -- --tab-id "<TAB_ID>" --json` or `pnpm relay:doctor -- --tab-ref "<TAB_REF>" --json`.
 
 Another agent has the tab lease:
 

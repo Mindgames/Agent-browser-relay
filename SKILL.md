@@ -7,7 +7,7 @@ description: Read metadata, DOM, screenshots, and structured page payloads from 
 
 Use this skill to operate through the local relay gateway on an explicitly attached browser tab, verify readiness before reads, and keep concurrent tab workflows lease-scoped instead of falling back to direct browser-control tools.
 
-Chrome is the documented target. Chromium-based browsers that can load the extension may also work, and relay status now surfaces detected host-browser identity plus a persistent profile id, but the skill does not yet provide first-class multi-browser orchestration.
+Chrome is the documented primary target. Chromium-based browsers that can load the extension may also work. One relay port can keep multiple browser/profile extension clients connected concurrently, and relay status exposes each browser id plus attached `tabRef` values.
 
 ## Quick start
 
@@ -65,11 +65,11 @@ Override per command with `--host`, `--port`, and `--attach-timeout-ms` when nee
    npm run extension:status -- --port "18793" --wait-for-connected --connected-timeout-ms 120000
    ```
 
-   This now also reports the detected browser host and persistent profile id for the connected extension instance.
+   This reports each connected browser host/profile id for the relay port.
 
 4. Attach the extension to the target tab (open toolbar popup and click attach)
 
-   Optional per-tab relay: in the popup, set **Tab port** before clicking attach if this tab should use a non-default relay port.
+   In normal use, keep every browser on the default relay port and attach the target tab in each browser. The relay namespaces tabs by `tabRef` (`browserId:tabId`).
    If you want the agent to create its own first background tab instead, enable **Allow agent to create new background tabs** in the popup.
 
    Agent requirement: after `extension:status` confirms Chrome loaded the extension, pause and ask the human to do this attach step, then wait for confirmation before continuing.
@@ -90,28 +90,37 @@ Override per command with `--host`, `--port`, and `--attach-timeout-ms` when nee
    npm run relay:doctor -- --port "18793" --tab-id "<TAB_ID>" --json
    ```
 
-   Resolve `<TAB_ID>` from status first (`npm run relay:status -- --all --status-timeout-ms 3000`).
-   For all agent runs, use the assigned tab id:
+   Resolve `<TAB_ID>` or `<TAB_REF>` from status first (`npm run relay:status -- --all --status-timeout-ms 3000`).
+   For all agent runs, use the assigned tab id or tab ref:
 
    ```bash
    npm run relay:doctor -- --host "127.0.0.1" --port "18793" --tab-id "<TAB_ID>" --json
    ```
 
+   ```bash
+   npm run relay:doctor -- --host "127.0.0.1" --port "18793" --tab-ref "<TAB_REF>" --json
+   ```
+
    Continue only if this command returns success.
 
-### Per-tab relay port behavior
-- If you run one relay process with multiple ports, the extension can manage different relay ports per attached tab.
+### Multi-browser behavior
+- One relay port supports multiple connected browser/profile extension clients.
+- Attached tabs include a browser-scoped `tabRef` formatted as `browserId:tabId`.
+- Use `--tab-id` when only one attached tab has that id; use `--tab-ref` when multiple browsers may expose the same numeric tab id.
+- If `Target.createTarget` is enabled in more than one browser, pass `--browser-id` to choose the browser.
+
+### Advanced per-tab relay port behavior
+- Multiple relay ports remain available for debugging or special routing.
 - A tab with no saved relay-port mapping uses the global default relay port (`18793`).
 - After a successful attach, the extension saves that tab’s mapped relay port and reuses it automatically.
 - Closed tabs have their mapping removed automatically.
-- This is per-tab port routing, not first-class multi-browser support.
 
 
 ## Mandatory behavior for agents
 - Use fixed commands from this repo. Do not try to "discover" alternate script names.
 - Gateway-only rule: always communicate through the local relay gateway (`/status` and `node scripts/read-active-tab.js`).
 - Never use direct browser-control tooling for this workflow (for example Playwright, Puppeteer, Selenium, `agent-browser`, or ad-hoc Chrome control scripts).
-- Never take control of a random Chrome window/profile. Only operate on the explicitly attached target tab leased via `--tab-id`.
+- Never take control of a random Chrome window/profile. Only operate on the explicitly attached target tab leased via `--tab-id` or `--tab-ref`.
 - On a fresh machine, explicitly tell the human to load the primary extension path from `npm run extension:path` before any attach/read attempt. After `skills add`, that is normally `~/.agents/skills/agent-browser-relay/extension`.
 - Canonical commands:
   - `npm run extension:path`
@@ -127,10 +136,10 @@ Override per command with `--host`, `--port`, and `--attach-timeout-ms` when nee
   - `npm run relay:status -- --all --status-timeout-ms 3000`
 - After `relay:start`, pause and ask the human to open the popup once so `npm run extension:status -- --port "18793" --wait-for-connected --connected-timeout-ms 120000` can confirm Chrome actually loaded the extension.
 - Only after `extension:status` succeeds, either ask the human to attach the target tab before reads, or confirm that **Allow agent to create new background tabs** is enabled before first-tab creation workflows.
-- Run `npm run relay:doctor -- --host "127.0.0.1" --port "18793" --tab-id "<TAB_ID>" --json` before reads and proceed only when it succeeds.
+- Run `npm run relay:doctor -- --host "127.0.0.1" --port "18793" --tab-id "<TAB_ID>" --json` or `npm run relay:doctor -- --host "127.0.0.1" --port "18793" --tab-ref "<TAB_REF>" --json` before reads and proceed only when it succeeds.
 - If the workflow will open tabs via `Target.createTarget`, run `npm run relay:doctor -- --host "127.0.0.1" --port "18793" --require-target-create --json` and proceed only when it succeeds.
-- For all agent runs (single-agent and concurrent), always pass `--tab-id <tabId>` on check/read commands so every operation is lease-scoped.
-- In concurrent runs, attached tabs are shared extension state, but an attached tab can only have one active lease at a time. Inspect `npm run relay:status -- --all --status-timeout-ms 3000` and prefer `leaseSummary.availableAttachedTabIds` or `attachedTabs[].leasedSessionId` when choosing the next `--tab-id`.
+- For all agent runs (single-agent and concurrent), always pass `--tab-id <tabId>` or `--tab-ref <browserId:tabId>` on check/read commands so every operation is lease-scoped.
+- In concurrent runs, attached tabs are shared relay state, but an attached tab can only have one active lease at a time. Inspect `npm run relay:status -- --all --status-timeout-ms 3000` and prefer `leaseSummary.availableAttachedTabIds`, `attachedTabs[].tabRef`, or `attachedTabs[].leasedSessionId` when choosing the next `--tab-id` / `--tab-ref`.
 - If doctor returns `TAB_LEASED_BY_OTHER_SESSION`, do not attempt takeover. Wait for that session to finish or retry with another attached tab that has no active lease.
 - When `Target.createTarget` is enabled, the extension may create and auto-attach the first agent-controlled tab for the session without a human seed attach step.
 - Do not stop/restart relay during the task unless the human requests it or recovery is explicitly required.
@@ -171,7 +180,7 @@ Version compatibility checks are also included under `source.extension`:
 If a mismatch is detected, the command also prints a human-friendly update hint to stderr on every run.
 
 - `scripts/read-active-tab.js` default extraction: `url`, `title`, `text`, `links`, `metaDescription`.
-- Relay session leases (`--tab-id`) for concurrent agent isolation per tab on one relay port.
+- Relay session leases (`--tab-id`, `--tab-ref`) for concurrent agent isolation per tab on one relay port.
 - `Runtime.evaluate` expression mode with `--expression`, `--expression-file`, or `--expression-stdin`.
 - Screenshot capture mode via `--screenshot` (optional `--screenshot-full-page`, `--screenshot-path`).
 - Preset extraction for WhatsApp and generic chat-auditing with regex filters.
@@ -192,12 +201,13 @@ If a mismatch is detected, the command also prints a human-friendly update hint 
 
 ## Common command examples
 
-In agent workflows, use the `--tab-id` variants. Unscoped commands are for manual/local debugging only.
+In agent workflows, use the `--tab-id` or `--tab-ref` variants. Unscoped commands are for manual/local debugging only.
 Prefer `--expression-file` or `--expression-stdin` over inline `--expression` for non-trivial JavaScript.
 
 ```bash
 node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --pretty false
 node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --tab-id 123 --pretty false
+node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --tab-ref chrome-profile:123 --pretty false
 node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --tab-id 123 --check --wait-for-attach --require-target-create --attach-timeout-ms 120000
 node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --expression "document.documentElement.outerHTML"
 node scripts/read-active-tab.js --host "127.0.0.1" --port "18793" --tab-id 123 --expression-file "./tmp/expression.js"
@@ -216,6 +226,6 @@ Before fetching data in an automation flow, run a lightweight preflight once to 
 For multiple agents on one relay:
 - Resolve tab ids from relay status (`npm run relay:status -- --all --status-timeout-ms 3000`).
 - Assign one tab id per agent.
-- Use `--tab-id` in every `read-active-tab.js` call for that agent.
+- Use `--tab-id` or `--tab-ref` in every `read-active-tab.js` call for that agent.
 - Treat the extension instance as shared: leases prevent two controller sessions from driving the same attached tab, but they do not create separate Chrome profiles or separate extension processes.
 - If `relay:doctor` reports `TAB_LEASED_BY_OTHER_SESSION`, inspect `attachedTabs`, `tabLeases`, and blocker `detail`, then pick another attached tab or wait for the owning session to release it.

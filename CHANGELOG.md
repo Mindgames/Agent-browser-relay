@@ -6,6 +6,18 @@ All notable changes to Agent Browser Relay are tracked here.
 
 - No unreleased entries yet.
 
+## [0.0.14] - 2026-06-09
+
+### Added
+
+- Added multi-browser relay hub support so one relay port can keep multiple browser/profile extension clients connected concurrently.
+- Added browser-scoped `tabRef` values (`browserId:tabId`) in relay status and lease routing for duplicate numeric tab ids across browsers.
+- Added `--tab-ref` and `--browser-id` support for relay doctor/read workflows.
+
+### Changed
+
+- Updated status, popup, README, skill, and agent guidance for seamless one-port multi-browser operation.
+
 ## [0.0.13] - 2026-04-02
 
 ### Added

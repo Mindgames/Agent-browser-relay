@@ -296,20 +296,22 @@ function enrichPortLeaseSummary(entry) {
   const leasedAttachedTabs = attachedTabs
     .filter((tab) => typeof tab?.leasedSessionId === 'string' && tab.leasedSessionId.length > 0)
     .map((tab) => ({
+      tabRef: typeof tab.tabRef === 'string' ? tab.tabRef : null,
       tabId: tab.tabId,
+      browserId: typeof tab.browserId === 'string' ? tab.browserId : null,
       sessionId: tab.leasedSessionId,
       title: tab.title || null,
       url: tab.url || null,
     }))
   const availableAttachedTabIds = attachedTabs
     .filter((tab) => !tab?.leasedSessionId)
-    .map((tab) => tab.tabId)
-    .filter(Number.isInteger)
-    .sort((a, b) => a - b)
+    .map((tab) => (typeof tab.tabRef === 'string' ? tab.tabRef : tab.tabId))
+    .filter((value) => typeof value === 'string' || Number.isInteger(value))
+    .sort((a, b) => String(a).localeCompare(String(b)))
   const attachedTabIds = attachedTabs
-    .map((tab) => tab.tabId)
-    .filter(Number.isInteger)
-    .sort((a, b) => a - b)
+    .map((tab) => (typeof tab.tabRef === 'string' ? tab.tabRef : tab.tabId))
+    .filter((value) => typeof value === 'string' || Number.isInteger(value))
+    .sort((a, b) => String(a).localeCompare(String(b)))
   const staleTabLeases = Array.isArray(entry?.staleTabLeases) ? entry.staleTabLeases : []
 
   return {
@@ -348,6 +350,12 @@ async function runDoctor() {
 
   if (args.tabId !== undefined) {
     childArgs.push('--tab-id', String(parsePositiveInt(args.tabId, 1, '--tab-id')))
+  }
+  if (args.tabRef !== undefined) {
+    childArgs.push('--tab-ref', String(args.tabRef))
+  }
+  if (args.browserId !== undefined) {
+    childArgs.push('--browser-id', String(args.browserId))
   }
   if (args.requireTargetCreate === true) {
     childArgs.push('--require-target-create')
@@ -696,6 +704,8 @@ function parseArgs(argv) {
     else if (arg === '--port' && argv[i + 1]) out.port = argv[++i]
     else if (arg === '--ports' && argv[i + 1]) out.ports = argv[++i]
     else if (arg === '--tab-id' && argv[i + 1]) out.tabId = argv[++i]
+    else if (arg === '--tab-ref' && argv[i + 1]) out.tabRef = argv[++i]
+    else if (arg === '--browser-id' && argv[i + 1]) out.browserId = argv[++i]
     else if (arg === '--timeout' && argv[i + 1]) out.timeout = argv[++i]
     else if (arg === '--start-timeout-ms' && argv[i + 1]) out.startTimeoutMs = argv[++i]
     else if (arg === '--action' && argv[i + 1]) out.action = argv[++i]
@@ -717,7 +727,7 @@ function printUsage() {
   Override with --host / --port / --ports when needed.
   node scripts/relay-manager.js start [--host ${DEFAULT_HOST}] [--port ${DEFAULT_PORT}] [--ports ${DEFAULT_PORT},18794] [--timeout 12000] [--status-timeout-ms 1200] [--start-timeout-ms 10000] [--auto-stop-ms 0]
   node scripts/relay-manager.js status [--host ${DEFAULT_HOST}] [--port ${DEFAULT_PORT}] [--ports ${DEFAULT_PORT},18794] [--status-timeout-ms 1200] [--all]
-  node scripts/relay-manager.js doctor [--host ${DEFAULT_HOST}] [--port ${DEFAULT_PORT}] [--tab-id 123] [--require-target-create] [--status-timeout-ms 1200] [--attach-timeout-ms 120000] [--json]
+  node scripts/relay-manager.js doctor [--host ${DEFAULT_HOST}] [--port ${DEFAULT_PORT}] [--tab-id 123] [--tab-ref browserId:123] [--browser-id browserId] [--require-target-create] [--status-timeout-ms 1200] [--attach-timeout-ms 120000] [--json]
   node scripts/relay-manager.js ports [--host ${DEFAULT_HOST}] --action add|remove --ports ${DEFAULT_PORT},18794 [--status-timeout-ms 1200]
   node scripts/relay-manager.js stop [--host ${DEFAULT_HOST}] [--port ${DEFAULT_PORT}] [--status-timeout-ms 1200]
 `)
