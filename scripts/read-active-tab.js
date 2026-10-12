@@ -1025,11 +1025,22 @@ function buildWhatsAppMessagesExpression(config) {
     }
   }
 
+  // Each selector is ordered on its own, but collecting selectors separately
+  // groups incoming messages ahead of outgoing ones. Restore page order before
+  // deduplication, filtering, and the result limit are applied.
+  const orderedMessageElements = Array.from(rawMessageElements).sort((left, right) => {
+    const position = left.compareDocumentPosition(right)
+    if (position & Node.DOCUMENT_POSITION_DISCONNECTED) return 0
+    if (position & Node.DOCUMENT_POSITION_FOLLOWING) return -1
+    if (position & Node.DOCUMENT_POSITION_PRECEDING) return 1
+    return 0
+  })
+
   const messages = []
   const seen = new Set()
   const seenCopyable = new Set()
 
-  for (const candidate of rawMessageElements) {
+  for (const candidate of orderedMessageElements) {
     if (!candidate?.querySelector) continue
 
     try {
