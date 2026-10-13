@@ -210,6 +210,9 @@ npm run relay:stop
 node scripts/read-active-tab.js
 ```
 
+Status and control requests reject interrupted HTTP responses, including truncated
+response bodies, so callers can report a relay error instead of waiting indefinitely.
+
 ## Troubleshooting
 
 Relay is not connected:
