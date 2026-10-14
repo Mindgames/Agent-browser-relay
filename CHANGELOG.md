@@ -4,7 +4,9 @@ All notable changes to Agent Browser Relay are tracked here.
 
 ## [Unreleased]
 
-- No unreleased entries yet.
+### Fixed
+
+- Allow an unbound relay session to create its first tab in an explicitly selected browser without requiring a tab lease before that tab exists.
 
 ## [0.0.14] - 2026-06-09
 
