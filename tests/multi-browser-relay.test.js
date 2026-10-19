@@ -301,3 +301,167 @@ test('tabRef leases route duplicate tab ids to the owning browser', async (t) =>
   await new Promise((resolve) => setTimeout(resolve, 50));
   assert.equal(chromeReceived, false);
 });
+
+
+async function startCreationFixture(t) {
+  const host = 'localhost';
+  const port = await getFreePort(host);
+  const relay = spawn(process.execPath, [
+    path.join(root, 'relay-server.js'), '--host', host, '--port', String(port), '--timeout', '1200',
+  ], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
+  t.after(() => stopRelay(relay));
+  await waitForLine(relay, /Agent Browser Relay listening/);
+
+  const browsers = {};
+  for (const profileId of ['chrome-profile', 'brave-profile']) {
+    const socket = await connectExtension(host, port, {
+      name: profileId, family: 'chromium', profileId,
+    }, []);
+    t.after(() => closeSocket(socket));
+    // Advertise the existing opt-in without attaching a tab first.
+    socket.send(JSON.stringify({
+      method: 'Grais.extensionHeartbeat',
+      browser: { name: profileId, family: 'chromium', profileId },
+      allowTargetCreate: true, attachedTabs: [],
+    }));
+    browsers[profileId] = socket;
+  }
+  const controller = await connectController(host, port);
+  t.after(() => closeSocket(controller));
+  const status = await fetchJson(`http://${host}:${port}/status`);
+  assert.equal(status.browsers.length, 2);
+  assert.deepEqual(status.attachedTabs, []);
+  let nextId = 1;
+  const request = (method, params) => {
+    const id = nextId++;
+    const response = waitForSocketJson(controller, (payload) => payload.id === id);
+    sendRequest(controller, id, method, params);
+    return response;
+  };
+  return { browsers, controller, request, host, port };
+}
+
+test('an unbound session can create and lease its first tab in the selected browser', async (t) => {
+  const { browsers, request } = await startCreationFixture(t);
+  const opened = await request('Grais.relay.openSession', {
+    client: 'test',
+  });
+  assert.equal(opened.error, undefined);
+  assert.equal(opened.result.tabRef, null);
+  const sessionId = opened.result.sessionId;
+  let otherBrowserCommands = 0;
+  browsers['chrome-profile'].on('message', (raw) => {
+    if (JSON.parse(String(raw)).method === 'forwardCDPCommand') otherBrowserCommands += 1;
+  });
+  let command;
+  browsers['brave-profile'].once('message', (raw) => {
+    command = JSON.parse(String(raw));
+    browsers['brave-profile'].send(JSON.stringify({ id: command.id, result: { tabId: 202, targetId: 'created-target' } }));
+  });
+  const response = await request('forwardCDPCommand', {
+    relaySessionId: sessionId, browserId: 'brave-profile',
+    method: 'Target.createTarget', params: { url: 'about:blank' },
+  });
+  assert.equal(response.error, undefined);
+  assert.equal(command.params.browserId, 'brave-profile');
+  assert.equal(command.params.tabId, undefined);
+  assert.equal(response.result.leasedTabRef, 'brave-profile:202');
+  const session = await request('Grais.relay.getSession', { sessionId });
+  assert.equal(session.result.tabRef, 'brave-profile:202');
+  const conflictingOpen = await request('Grais.relay.openSession', { browserId: 'chrome-profile' });
+  assert.ok(conflictingOpen.error);
+  const conflictingCreate = await request('forwardCDPCommand', {
+    relaySessionId: sessionId, browserId: 'chrome-profile',
+    method: 'Target.createTarget', params: { url: 'about:blank' },
+  });
+  assert.ok(conflictingCreate.error, 'a browser-only request cannot redirect an existing tab lease');
+  const evaluated = waitForSocketJson(browsers['brave-profile'], (payload) => payload.method === 'forwardCDPCommand');
+  const evaluation = request('forwardCDPCommand', {
+    relaySessionId: sessionId, method: 'Runtime.evaluate', params: { expression: 'document.title' },
+  });
+  const evaluateCommand = await evaluated;
+  assert.equal(evaluateCommand.params.tabRef, 'brave-profile:202');
+  browsers['brave-profile'].send(JSON.stringify({ id: evaluateCommand.id, result: { value: 'Blank' } }));
+  await evaluation;
+  assert.equal(otherBrowserCommands, 0);
+});
+
+test('explicit first-tab selection works after opening an unbound session and fails closed otherwise', async (t) => {
+  const { browsers, request } = await startCreationFixture(t);
+  const opened = await request('Grais.relay.openSession', { client: 'test' });
+  const sessionId = opened.result.sessionId;
+  const unknownOpen = await request('Grais.relay.openSession', { browserId: 'missing-profile' });
+  assert.ok(unknownOpen.error);
+  for (const invalidTarget of [{ tabId: 0 }, { tabRef: 'invalid-ref' }]) {
+    const invalidOpen = await request('Grais.relay.openSession', {
+      browserId: 'brave-profile', ...invalidTarget,
+    });
+    assert.ok(invalidOpen.error, 'an invalid tab selector is not a browser-only session');
+    const invalidCreate = await request('forwardCDPCommand', {
+      relaySessionId: sessionId, browserId: 'brave-profile', ...invalidTarget,
+      method: 'Target.createTarget', params: { url: 'about:blank' },
+    });
+    assert.ok(invalidCreate.error, 'an invalid tab selector is not lease-free creation');
+  }
+  const ambiguous = await request('forwardCDPCommand', {
+    relaySessionId: sessionId, method: 'Target.createTarget', params: { url: 'about:blank' },
+  });
+  assert.match(ambiguous.error, /Multiple browsers/);
+  const missing = await request('forwardCDPCommand', {
+    relaySessionId: sessionId, browserId: 'missing-profile',
+    method: 'Target.createTarget', params: { url: 'about:blank' },
+  });
+  assert.match(missing.error, /not connected/);
+  const unleased = await request('forwardCDPCommand', {
+    relaySessionId: sessionId, browserId: 'brave-profile',
+    method: 'Runtime.evaluate', params: { expression: 'document.title' },
+  });
+  assert.ok(unleased.error, 'ordinary commands must still require a tab lease');
+  const forwarded = waitForSocketJson(browsers['brave-profile'], (payload) => payload.method === 'forwardCDPCommand');
+  const created = request('forwardCDPCommand', {
+    relaySessionId: sessionId, browserId: 'brave-profile',
+    method: 'Target.createTarget', params: { url: 'about:blank' },
+  });
+  const command = await forwarded;
+  assert.equal(command.params.method, 'Target.createTarget');
+  browsers['brave-profile'].send(JSON.stringify({ id: command.id, result: { tabId: 303 } }));
+  assert.equal((await created).result.leasedTabRef, 'brave-profile:303');
+});
+
+test('first-tab creation preserves session ownership and never substitutes a disconnected browser', async (t) => {
+  const { browsers, controller, request, host, port } = await startCreationFixture(t);
+  const creation = { browserId: 'brave-profile', method: 'Target.createTarget', params: { url: 'about:blank' } };
+  const noSession = await request('forwardCDPCommand', creation);
+  assert.match(noSession.error, /requires an active relay session/);
+  const unknownSession = await request('forwardCDPCommand', { ...creation, relaySessionId: 'unknown-session' });
+  assert.match(unknownSession.error, /Unknown relay session/);
+  const opened = await request('Grais.relay.openSession', { client: 'test' });
+  const sessionId = opened.result.sessionId;
+  const otherController = await connectController(host, port);
+  t.after(() => closeSocket(otherController));
+  const wrongOwner = waitForSocketJson(otherController, (payload) => payload.id === 1);
+  sendRequest(otherController, 1, 'forwardCDPCommand', { ...creation, relaySessionId: sessionId });
+  assert.match((await wrongOwner).error, /owned by a different controller/);
+
+  const disconnected = waitForSocketJson(controller, (payload) => payload.params?.type === 'extension_browser_disconnected');
+  await closeSocket(browsers['brave-profile']);
+  await disconnected;
+  let remainingBrowserCommands = 0;
+  browsers['chrome-profile'].on('message', (raw) => {
+    if (JSON.parse(String(raw)).method === 'forwardCDPCommand') remainingBrowserCommands += 1;
+  });
+  const unavailable = await request('forwardCDPCommand', { ...creation, relaySessionId: sessionId });
+  assert.match(unavailable.error, /not connected/);
+  assert.equal(remainingBrowserCommands, 0);
+
+  // The original unselected single-browser flow remains available.
+  browsers['chrome-profile'].once('message', (raw) => {
+    const command = JSON.parse(String(raw));
+    browsers['chrome-profile'].send(JSON.stringify({ id: command.id, result: { tabId: 404 } }));
+  });
+  const singleBrowser = await request('forwardCDPCommand', {
+    relaySessionId: sessionId, method: 'Target.createTarget', params: { url: 'about:blank' },
+  });
+  assert.equal(singleBrowser.result.leasedTabRef, 'chrome-profile:404');
+  assert.equal(remainingBrowserCommands, 1);
+});

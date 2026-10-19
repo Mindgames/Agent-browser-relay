@@ -1268,6 +1268,17 @@ function bindForwardCommandToSessionLease(state, socket, forward) {
   let targetTabRef = parseTabRef(payloadParams.tabRef)
   let targetTabId = targetTabRef?.tabId || parseTabId(payloadParams.tabId)
   let targetBrowserId = targetTabRef?.browserId || sanitizeBrowserId(payloadParams.browserId)
+  if (
+    payloadParams.tabRef === undefined &&
+    payloadParams.tabId === undefined &&
+    !session.leasedTabRef &&
+    allowsLeaseFreeForwardMethod(forwardMethod)
+  ) {
+    const browser = resolveBrowserForLeaseFreeForward(state, payloadParams)
+    if (!browser.ok) return { ok: false, error: browser.error }
+    payloadParams.browserId = browser.browserId
+    return { ok: true, forward }
+  }
   if (targetTabRef || targetBrowserId || targetTabId) {
     const lease = claimTabLease(state, session, {
       tabRef: targetTabRef?.tabRef || payloadParams.tabRef,
@@ -1284,11 +1295,6 @@ function bindForwardCommandToSessionLease(state, socket, forward) {
     targetTabRef = parseTabRef(session.leasedTabRef)
     targetTabId = session.leasedTabId
     targetBrowserId = session.leasedBrowserId
-  } else if (allowsLeaseFreeForwardMethod(forwardMethod)) {
-    const browser = resolveBrowserForLeaseFreeForward(state, payloadParams)
-    if (!browser.ok) return { ok: false, error: browser.error }
-    payloadParams.browserId = browser.browserId
-    return { ok: true, forward }
   } else {
     return {
       ok: false,

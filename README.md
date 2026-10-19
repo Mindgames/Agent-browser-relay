@@ -271,6 +271,22 @@ SKILL.md                   Agent Browser Relay skill instructions
 AGENTS.md                  Required agent operating contract
 ```
 
+## Creating the first tab through the relay protocol
+
+After the existing target-create permission and readiness checks pass, a protocol
+client can open `Grais.relay.openSession` without tab or browser selectors, then
+send `forwardCDPCommand` with that `relaySessionId`, `method: "Target.createTarget"`,
+and the chosen `browserId` in the command envelope. Select the browser on the
+creation command itself; opening an unbound session does not select a browser.
+With multiple connected browsers, omitting `browserId` is ambiguous. An explicit
+disconnected browser is rejected rather than replaced with another browser.
+
+The successful response leases the new browser-scoped tab to that session.
+Ordinary commands still require a tab lease. Existing leases are not redirected
+by a browser-only creation request; use a separate unbound session for that flow.
+The `read-active-tab.js` CLI provides reads and readiness checks, not a
+`Target.createTarget` execution command.
+
 ## License
 
 Agent Browser Relay is open source under the MIT License.
