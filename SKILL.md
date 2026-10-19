@@ -196,6 +196,7 @@ If a mismatch is detected, the command also prints a human-friendly update hint 
 ## Presets and filters
 
 - `--preset` values: `default`, `whatsapp`, `wa`, `whatsapp-messages`, `chat-audit`, `chat`.
+- Generic chat audits retain messages without sender metadata unless `--sender-regex` is set. Sender exclusions apply only to known senders, matching the WhatsApp presets.
 - Regex filters: `--text-regex`, `--exclude-text-regex`, `--link-text-regex`, `--link-href-regex`.
 - WhatsApp/chat filters: `--message-regex`, `--exclude-message-regex`, `--sender-regex`, `--exclude-sender-regex`.
 
