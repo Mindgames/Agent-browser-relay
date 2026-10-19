@@ -1594,6 +1594,12 @@ function requestJson(url, timeoutMs = DEFAULT_STATUS_TIMEOUT_MS) {
       },
       (res) => {
         let body = ''
+        res.on('aborted', () => {
+          reject(new Error('Relay response aborted'))
+        })
+        res.on('error', (error) => {
+          reject(error)
+        })
         res.on('data', (chunk) => {
           body += String(chunk || '')
         })
