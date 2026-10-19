@@ -91,7 +91,7 @@ function extract(messages, config = {}) {
     const direction = message.outgoing ? 'message-out' : 'message-in';
     const wrapper = new FixtureElement({
       position: index * 2,
-      selectors: ['.' + direction, '[role="row"]', '[data-id]'],
+      selectors: ['.' + direction, '[data-id]', ...(message.nestedRow ? [] : ['[role="row"]'])],
       attributes: { 'data-id': message.id },
     });
     const copyable = new FixtureElement({
@@ -104,14 +104,19 @@ function extract(messages, config = {}) {
       text: message.text || message.id,
     });
     wrapper.append(copyable);
+    let row = wrapper;
+    if (message.nestedRow) {
+      row = new FixtureElement({ position: index * 2 - 0.25, selectors: ['[role="row"]'] });
+      row.append(wrapper);
+    }
     if (message.inScope) {
       if (!scope) {
         scope = new FixtureElement({ position: index * 2 - 0.5, selectors: ['#selected'] });
         root.append(scope);
       }
-      scope.append(wrapper);
+      scope.append(row);
     } else {
-      root.append(wrapper);
+      root.append(row);
     }
   }
 
@@ -222,4 +227,50 @@ test('empty conversations remain valid', () => {
 
 test('limits larger than the result retain every message in DOM order', () => {
   assert.deepEqual(ids(extract(interleaved, { maxMessages: 20 })), ['question', 'answer', 'thanks', 'welcome']);
+});
+
+const nested = (messages) => messages.map((message) => ({ ...message, nestedRow: true }));
+
+test('outer rows preserve same-minute message IDs and both directions without duplicates', () => {
+  const result = extract(nested(interleaved));
+  assert.deepEqual(ids(result), ['question', 'answer', 'thanks', 'welcome']);
+  assert.deepEqual(result.messages.map((message) => message.isOutgoing), [false, true, false, true]);
+  assert.deepEqual(result.messages.map((message) => message.message), ['question', 'answer', 'thanks', 'welcome']);
+});
+
+test('outer rows preserve outgoing-first order before the limit', () => {
+  const result = extract(nested([
+    { id: 'sent-first', outgoing: true },
+    { id: 'received-next', outgoing: false },
+    { id: 'sent-last', outgoing: true },
+  ]), { maxMessages: 2 });
+  assert.deepEqual(ids(result), ['sent-first', 'received-next']);
+  assert.deepEqual(result.messages.map((message) => message.isOutgoing), [true, false]);
+});
+
+test('nested message filters and exclusions precede the ordered limit', () => {
+  const result = extract(nested([
+    { id: 'ignored', outgoing: true, text: 'skip' },
+    { id: 'first-match', outgoing: false, text: 'keep first' },
+    { id: 'excluded', outgoing: false, text: 'keep excluded' },
+    { id: 'second-match', outgoing: true, text: 'keep second' },
+    { id: 'later-match', outgoing: false, text: 'keep later' },
+  ]), {
+    maxMessages: 2,
+    messageRegex: { pattern: '^keep', flags: '' },
+    excludeMessageRegex: { pattern: 'excluded', flags: '' },
+  });
+  assert.deepEqual(ids(result), ['first-match', 'second-match']);
+  assert.deepEqual(result.messages.map((message) => message.isOutgoing), [false, true]);
+});
+
+test('nested sender filtering precedes the ordered limit', () => {
+  const result = extract(nested([
+    { id: 'ignored', outgoing: false, sender: 'Bob' },
+    { id: 'first-match', outgoing: true, sender: 'Alice' },
+    { id: 'second-match', outgoing: false, sender: 'Alice' },
+    { id: 'later-match', outgoing: true, sender: 'Alice' },
+  ]), { maxMessages: 2, senderRegex: { pattern: '^Alice$', flags: '' } });
+  assert.deepEqual(ids(result), ['first-match', 'second-match']);
+  assert.deepEqual(result.messages.map((message) => message.isOutgoing), [true, false]);
 });

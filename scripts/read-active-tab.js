@@ -1025,11 +1025,27 @@ function buildWhatsAppMessagesExpression(config) {
     }
   }
 
-  // Each selector is ordered on its own, but collecting selectors separately
-  // groups incoming messages ahead of outgoing ones. Restore page order before
-  // deduplication, filtering, and the result limit are applied.
-  const orderedMessageElements = Array.from(rawMessageElements).sort((left, right) => {
-    const position = left.compareDocumentPosition(right)
+  // Preserve selector priority when choosing each message's root. Sorting raw
+  // candidates first can select an outer row without the message ID/direction.
+  const canonicalMessages = []
+  const seenCopyable = new Set()
+  for (const candidate of rawMessageElements) {
+    if (!candidate?.querySelector) continue
+    try {
+      const messageRoot = candidate.closest?.(MESSAGE_ROOT_SELECTOR) || candidate
+      const copyableTextElement = getCopyableTextElement(messageRoot)
+      if (!copyableTextElement || seenCopyable.has(copyableTextElement)) continue
+      seenCopyable.add(copyableTextElement)
+      canonicalMessages.push({ messageRoot, copyableTextElement })
+    } catch {
+      continue
+    }
+  }
+
+  // Restore conversation order after root selection and before filtering,
+  // message-ID deduplication, or the result limit.
+  canonicalMessages.sort((left, right) => {
+    const position = left.copyableTextElement.compareDocumentPosition(right.copyableTextElement)
     if (position & Node.DOCUMENT_POSITION_DISCONNECTED) return 0
     if (position & Node.DOCUMENT_POSITION_FOLLOWING) return -1
     if (position & Node.DOCUMENT_POSITION_PRECEDING) return 1
@@ -1038,18 +1054,9 @@ function buildWhatsAppMessagesExpression(config) {
 
   const messages = []
   const seen = new Set()
-  const seenCopyable = new Set()
 
-  for (const candidate of orderedMessageElements) {
-    if (!candidate?.querySelector) continue
-
+  for (const { messageRoot, copyableTextElement } of canonicalMessages) {
     try {
-      const messageRoot = candidate.closest?.(MESSAGE_ROOT_SELECTOR) || candidate
-      const copyableTextElement = getCopyableTextElement(messageRoot)
-      if (!copyableTextElement) continue
-      if (seenCopyable.has(copyableTextElement)) continue
-      seenCopyable.add(copyableTextElement)
-
       const quoteInfo = extractQuotedReply(copyableTextElement)
       const plainMessage = extractMessageText(copyableTextElement)
       const trimmedBody = String(plainMessage || '').trim()
