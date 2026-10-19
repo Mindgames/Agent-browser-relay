@@ -149,6 +149,10 @@ node scripts/read-active-tab.js \
   --pretty false
 ```
 
+WhatsApp extraction (`--preset whatsapp-messages`, `whatsapp`, or `wa`) removes
+rendered timestamp badges without stripping matching text from the message body.
+A message such as `Meet me at 12:00` keeps its full text even when sent at 12:00.
+
 Take a full-page screenshot:
 
 ```bash

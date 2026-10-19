@@ -950,16 +950,8 @@ function buildWhatsAppMessagesExpression(config) {
       node.remove()
     })
 
-    let messageText = String(clone.textContent || '')
-    const timeNode = copyableTextElement.querySelector('span > span.x3nfvp2') || copyableTextElement.querySelector('span.x3nfvp2')
-    if (timeNode) {
-      const timeText = String(timeNode.textContent || '')
-      if (timeText && messageText.endsWith(timeText)) {
-        messageText = messageText.slice(0, messageText.length - timeText.length)
-      }
-    }
-
-    return messageText.trim()
+    // Timestamp nodes are already removed; a matching body suffix is user text.
+    return String(clone.textContent || '').trim()
   }
 
   const parsePrePlain = (prePlainText) => {
