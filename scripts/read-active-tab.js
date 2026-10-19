@@ -1573,6 +1573,7 @@ function isRecoverableRelayError(error) {
   return (
     message.includes('relay has no active extension connection') ||
     message.includes('relay disconnected') ||
+    message.includes('relay browser disconnected') ||
     message.includes('timed out waiting for runtime.evaluate') ||
     message.includes('timed out waiting for runtime.enable') ||
     message.includes('no response from relay bridge') ||
