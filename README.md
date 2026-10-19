@@ -164,6 +164,8 @@ node scripts/read-active-tab.js \
 
 For long JavaScript expressions, prefer `--expression-file` or `--expression-stdin` instead of shell-quoted inline code.
 
+WhatsApp extraction (`--preset whatsapp-messages`) preserves page order across incoming and outgoing messages. Message and sender filters apply before `--max-messages` limits the result.
+
 ## Agent Prompt Example
 
 ```text

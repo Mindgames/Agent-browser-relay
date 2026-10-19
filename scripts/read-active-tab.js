@@ -1025,20 +1025,38 @@ function buildWhatsAppMessagesExpression(config) {
     }
   }
 
-  const messages = []
-  const seen = new Set()
+  // Preserve selector priority when choosing each message's root. Sorting raw
+  // candidates first can select an outer row without the message ID/direction.
+  const canonicalMessages = []
   const seenCopyable = new Set()
-
   for (const candidate of rawMessageElements) {
     if (!candidate?.querySelector) continue
-
     try {
       const messageRoot = candidate.closest?.(MESSAGE_ROOT_SELECTOR) || candidate
       const copyableTextElement = getCopyableTextElement(messageRoot)
-      if (!copyableTextElement) continue
-      if (seenCopyable.has(copyableTextElement)) continue
+      if (!copyableTextElement || seenCopyable.has(copyableTextElement)) continue
       seenCopyable.add(copyableTextElement)
+      canonicalMessages.push({ messageRoot, copyableTextElement })
+    } catch {
+      continue
+    }
+  }
 
+  // Restore conversation order after root selection and before filtering,
+  // message-ID deduplication, or the result limit.
+  canonicalMessages.sort((left, right) => {
+    const position = left.copyableTextElement.compareDocumentPosition(right.copyableTextElement)
+    if (position & Node.DOCUMENT_POSITION_DISCONNECTED) return 0
+    if (position & Node.DOCUMENT_POSITION_FOLLOWING) return -1
+    if (position & Node.DOCUMENT_POSITION_PRECEDING) return 1
+    return 0
+  })
+
+  const messages = []
+  const seen = new Set()
+
+  for (const { messageRoot, copyableTextElement } of canonicalMessages) {
+    try {
       const quoteInfo = extractQuotedReply(copyableTextElement)
       const plainMessage = extractMessageText(copyableTextElement)
       const trimmedBody = String(plainMessage || '').trim()
