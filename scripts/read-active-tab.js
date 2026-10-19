@@ -1739,16 +1739,17 @@ function findRelayPortStatus(snapshot, port = relayPort) {
   return snapshot.ports.find((entry) => entry.port === port) || null
 }
 
-function findAttachedTabOnPort(portStatus, tabId) {
+function findAttachedTabOnPort(portStatus, tabId, tabRef = null) {
   if (!portStatus || !Number.isInteger(tabId)) return null
+  if (tabRef) return portStatus.attachedTabs.find((entry) => entry.tabRef === tabRef) || null
   return portStatus.attachedTabs.find((entry) => entry.tabId === tabId) || null
 }
 
-function findAttachedTabAcrossPorts(snapshot, tabId) {
+function findAttachedTabAcrossPorts(snapshot, tabId, tabRef = null) {
   if (!snapshot || !Number.isInteger(tabId)) return []
   const matches = []
   for (const entry of snapshot.ports) {
-    const tab = findAttachedTabOnPort(entry, tabId)
+    const tab = findAttachedTabOnPort(entry, tabId, tabRef)
     if (!tab) continue
     matches.push({ port: entry.port, tab })
   }
@@ -1900,7 +1901,7 @@ function buildExtensionConnectionBlocker(snapshot) {
 function buildRequestedTabBlocker(snapshot, tabId) {
   if (!Number.isInteger(tabId)) return null
   const targetStatus = findRelayPortStatus(snapshot, relayPort)
-  const targetTab = findAttachedTabOnPort(targetStatus, tabId)
+  const targetTab = findAttachedTabOnPort(targetStatus, tabId, requestedTabRefValue)
   if (targetTab) {
     if (targetTab.leasedSessionId && targetTab.leasedSessionId !== relaySessionId) {
       const otherUnleasedTabIds = formatAlternativeTabIds(targetStatus, tabId, { excludeLeased: true })
@@ -1924,7 +1925,7 @@ function buildRequestedTabBlocker(snapshot, tabId) {
     return null
   }
 
-  const attachedElsewhere = findAttachedTabAcrossPorts(snapshot, tabId).find((entry) => entry.port !== relayPort)
+  const attachedElsewhere = findAttachedTabAcrossPorts(snapshot, tabId, requestedTabRefValue).find((entry) => entry.port !== relayPort)
   if (attachedElsewhere) {
     return createBlocker(
       'TAB_ATTACHED_ON_OTHER_PORT',
