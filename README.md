@@ -110,6 +110,11 @@ Or target a specific browser tab ref:
 pnpm relay:doctor -- --host "127.0.0.1" --port "18793" --tab-ref "<TAB_REF>" --json
 ```
 
+When using `--require-target-create`, readiness checks the selected browser's
+permission. With multiple connected browsers, pass `--browser-id` for first-tab
+creation or `--tab-ref` for an attached tab; a different browser's permission
+cannot make the selected browser ready.
+
 Read the default page payload:
 
 ```bash

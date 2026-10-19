@@ -1674,6 +1674,21 @@ function sanitizeBrowserIdentity(value) {
   return { name, family, version, profileId }
 }
 
+function sanitizeStatusBrowsers(value) {
+  // Only an omitted list identifies legacy status. Malformed modern lists must
+  // not inherit aggregate permission or appear to contain one selected browser.
+  if (value === undefined) return null
+  if (!Array.isArray(value) || value.some((browser) =>
+    !browser || typeof browser.browserId !== 'string' || !browser.browserId.trim(),
+  )) return []
+  return value.map((browser) => ({
+    browserId: browser.browserId,
+    extensionConnected: browser.extensionConnected === true,
+    attachedTabs: Array.isArray(browser.attachedTabs) ? browser.attachedTabs.map(sanitizeStatusTab).filter(Boolean) : [],
+    allowTargetCreate: typeof browser.allowTargetCreate === 'boolean' ? browser.allowTargetCreate : null,
+  }))
+}
+
 function summarizeRelayPorts(statusPayload) {
   const rawPorts = Array.isArray(statusPayload?.ports)
     ? statusPayload.ports
@@ -1692,6 +1707,7 @@ function summarizeRelayPorts(statusPayload) {
           staleTabLeases: statusPayload?.staleTabLeases,
           allowTargetCreate: statusPayload?.allowTargetCreate,
           browser: statusPayload?.browser,
+          browsers: statusPayload?.browsers,
         },
       ]
 
@@ -1722,6 +1738,7 @@ function summarizeRelayPorts(statusPayload) {
       staleTabLeases: Array.isArray(raw.staleTabLeases)
         ? raw.staleTabLeases.map(sanitizeStatusLease).filter(Boolean)
         : [],
+      browsers: sanitizeStatusBrowsers(raw.browsers),
       browser: sanitizeBrowserIdentity(raw.browser),
       extensionVersion: typeof raw.extensionVersion === 'string' ? raw.extensionVersion : null,
       extensionName: typeof raw.extensionName === 'string' ? raw.extensionName : null,
@@ -1753,6 +1770,43 @@ function findAttachedTabAcrossPorts(snapshot, tabId) {
     matches.push({ port: entry.port, tab })
   }
   return matches
+}
+
+function getTargetCreateReadiness(portStatus) {
+  // The legacy aggregate belongs to the most recent heartbeat, not necessarily
+  // the browser selected by this command. Preserve it only for older relays.
+  if (!Array.isArray(portStatus?.browsers)) {
+    return { allowed: portStatus?.allowTargetCreate ?? null, blocker: null }
+  }
+  const browsers = portStatus.browsers.filter((browser) => browser.extensionConnected)
+  let matches = browsers
+  if (leasedBrowserId) {
+    matches = browsers.filter((browser) => browser.browserId === leasedBrowserId)
+  } else if (Number.isInteger(leasedTabId)) {
+    matches = browsers.filter((browser) => browser.attachedTabs.some((tab) => tab.tabId === leasedTabId))
+  }
+  if (matches.length === 0) {
+    return {
+      allowed: null,
+      blocker: createBlocker(
+        'TARGET_CREATE_BROWSER_DISCONNECTED',
+        'The selected browser is not connected or its requested tab is not attached on this relay port.',
+        'Open the selected browser extension, re-attach the requested tab if needed, and retry.',
+      ),
+    }
+  }
+  if (matches.length > 1) {
+    return {
+      allowed: null,
+      blocker: createBlocker(
+        'TARGET_CREATE_BROWSER_AMBIGUOUS',
+        'Target.createTarget readiness needs a specific browser when multiple browsers match.',
+        'Pass --browser-id for first-tab creation, or --tab-ref for an attached tab, then retry.',
+        { retryable: false },
+      ),
+    }
+  }
+  return { allowed: matches[0].allowTargetCreate, blocker: null }
 }
 
 function describeStatusTab(tab) {
@@ -2220,6 +2274,8 @@ async function checkBridge() {
       : null
     relay.activePorts = snapshot.activePorts
     relay.ports = snapshot.ports
+    const targetCreateReadiness = requireTargetCreate ? getTargetCreateReadiness(targetStatus) : null
+    if (targetCreateReadiness) relay.targetCreateAllowed = targetCreateReadiness.allowed
 
     if (!relay.extensionConnected) {
       return buildBlockedCheckResult(relay, extension, buildExtensionConnectionBlocker(snapshot))
@@ -2228,6 +2284,10 @@ async function checkBridge() {
     const requestedTabBlocker = buildRequestedTabBlocker(snapshot, requestedTabId)
     if (requestedTabBlocker) {
       return buildBlockedCheckResult(relay, extension, requestedTabBlocker)
+    }
+
+    if (targetCreateReadiness?.blocker) {
+      return buildBlockedCheckResult(relay, extension, targetCreateReadiness.blocker)
     }
 
     await sendRelayPing(timeoutMs)
