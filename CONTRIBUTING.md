@@ -24,6 +24,8 @@ pnpm build
 pnpm test
 ```
 
+`lint` and `build` syntax-check each `.js` file in the repository root and recursively in `extension/`, `scripts/`, and `tests/`, without executing those files. Dependency directories are excluded.
+
 For relay behavior changes, also run the gateway readiness flow against an explicitly attached tab:
 
 ```bash
