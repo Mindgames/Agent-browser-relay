@@ -98,6 +98,8 @@ pnpm relay:status -- --all --status-timeout-ms 3000
 
 Replace `<TAB_ID>` with the attached tab id. If more than one browser is connected and tab ids collide, use `<TAB_REF>` from `relay:status` instead. A tab ref is `browserId:tabId`.
 
+Readiness checks match the full tab ref when you use `--tab-ref` or `--browser-id` with `--tab-id`. A lease on another browser's same-numbered tab does not block the selected tab. A missing selected tab or a lease held by another session on that selected tab still blocks the read.
+
 Run the readiness check first:
 
 ```bash
