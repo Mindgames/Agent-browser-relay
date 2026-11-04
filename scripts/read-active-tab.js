@@ -1271,7 +1271,7 @@ function buildChatAuditExpression(config) {
     }
 
     const sender = extractSender(node)
-    if (!matchText(sender, senderInclude, senderExclude)) {
+    if ((sender && !matchText(sender, senderInclude, senderExclude)) || (!sender && senderInclude)) {
       filteredBySender += 1
       continue
     }
