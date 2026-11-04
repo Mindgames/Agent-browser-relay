@@ -210,6 +210,9 @@ npm run relay:stop
 node scripts/read-active-tab.js
 ```
 
+Status and control requests reject interrupted HTTP responses, including truncated
+response bodies, so callers can report a relay error instead of waiting indefinitely.
+
 ## Troubleshooting
 
 Reads and screenshots retry transient browser-extension disconnects within the configured `--retries` budget (two retries by default). Each retry prepares the targeted tab again; if recovery still fails, the command returns the error.

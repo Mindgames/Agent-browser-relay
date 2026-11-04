@@ -245,6 +245,12 @@ function requestJson(url, timeoutMs = 1000) {
       },
       (res) => {
         let body = ''
+        res.on('aborted', () => {
+          reject(new Error('Relay response aborted'))
+        })
+        res.on('error', (error) => {
+          reject(error)
+        })
         res.on('data', (chunk) => {
           body += String(chunk || '')
         })
