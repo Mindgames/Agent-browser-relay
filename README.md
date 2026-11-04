@@ -212,6 +212,8 @@ node scripts/read-active-tab.js
 
 ## Troubleshooting
 
+Reads and screenshots retry transient browser-extension disconnects within the configured `--retries` budget (two retries by default). Each retry prepares the targeted tab again; if recovery still fails, the command returns the error.
+
 Relay is not connected:
 
 ```bash
