@@ -138,6 +138,11 @@ The default payload includes:
 - `links`
 - `metaDescription`
 
+The `whatsapp-messages` preset (also `whatsapp` or `wa`) converts AM/PM message
+times to 24-hour `time` and `date` fields, including noon and midnight. Times
+without AM/PM keep their existing 24-hour interpretation. These remain local
+wall-clock strings with no inferred timezone; date ordering is unchanged.
+
 Read the full DOM:
 
 ```bash

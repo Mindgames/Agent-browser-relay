@@ -978,11 +978,18 @@ function buildWhatsAppMessagesExpression(config) {
     const dateMatch = rawDate.match(/(\\d{1,2})[\\/.-](\\d{1,2})[\\/.-](\\d{2,4})/)
     if (!rawTime || !dateMatch || !dateMatch[1] || !dateMatch[2] || !dateMatch[3]) return null
 
-    const normalizedTime = rawTime.replace(/\\s*[APMapm]{2}$/, '')
+    const meridiem = rawTime.match(/\\s*([ap]m)$/i)?.[1]?.toLowerCase()
+    const normalizedTime = rawTime.replace(/\\s*[ap]m$/i, '')
     const timeParts = normalizedTime.split(':')
     if (timeParts.length < 2) return null
 
-    const hour = String(timeParts[0]).trim().padStart(2, '0')
+    let hourValue = String(timeParts[0]).trim()
+    if (meridiem) {
+      const hour12 = Number(hourValue)
+      if (!Number.isInteger(hour12) || hour12 < 1 || hour12 > 12) return null
+      hourValue = String(hour12 % 12 + (meridiem === 'pm' ? 12 : 0))
+    }
+    const hour = hourValue.padStart(2, '0')
     const minute = String(timeParts[1]).trim().padStart(2, '0')
     const time = hour + ':' + minute
 
