@@ -179,6 +179,13 @@ Version compatibility checks are also included under `source.extension`:
 
 If a mismatch is detected, the command also prints a human-friendly update hint to stderr on every run.
 
+With multi-browser status, `source.browser`, `observedExtensionVersion`, and
+`observedCapabilities` describe the selected or leased browser on the requested
+relay port. Numeric-only targets use the uniquely matching attached browser;
+missing browsers or missing/ambiguous numeric targets report unknown metadata
+rather than another browser's latest heartbeat. Legacy status without `browsers` retains its
+aggregate metadata behavior.
+
 - `scripts/read-active-tab.js` default extraction: `url`, `title`, `text`, `links`, `metaDescription`.
 - Relay session leases (`--tab-id`, `--tab-ref`) for concurrent agent isolation per tab on one relay port.
 - `Runtime.evaluate` expression mode with `--expression`, `--expression-file`, or `--expression-stdin`.

@@ -186,6 +186,7 @@ let relayStatusSnapshot = null
 let cachedExpression = null
 
 function getRelaySource() {
+  const observedStatus = getObservedExtensionStatus()
   const observedExtensionVersion = getObservedExtensionVersion()
   const observedBrowser = getObservedBrowserIdentity()
   const expectedExtensionVersion = installBundle.sourceVersion || installBundle.relayVersion || installBundle.installedVersion || null
@@ -220,9 +221,9 @@ function getRelaySource() {
       relayVersion: installBundle.relayVersion,
       observedExtensionVersion,
       expectedExtensionVersion,
-      observedCapabilities: relayStatusSnapshot?.extensionCapabilities
-        && typeof relayStatusSnapshot.extensionCapabilities === 'object'
-        ? relayStatusSnapshot.extensionCapabilities
+      observedCapabilities: observedStatus?.extensionCapabilities
+        && typeof observedStatus.extensionCapabilities === 'object'
+        ? observedStatus.extensionCapabilities
         : null,
       observedVersionMismatch: extensionMismatch,
       updated: Boolean(installBundle.updated),
@@ -234,30 +235,34 @@ function getRelaySource() {
   }
 }
 
-function getObservedExtensionVersion() {
+function getObservedExtensionStatus() {
   if (!relayStatusSnapshot || typeof relayStatusSnapshot !== 'object') return null
-  if (typeof relayStatusSnapshot.extensionVersion === 'string') return relayStatusSnapshot.extensionVersion
-  if (!Array.isArray(relayStatusSnapshot.ports)) return null
-  for (const entry of relayStatusSnapshot.ports) {
-    if (!entry || typeof entry !== 'object') continue
-    if (Number(entry.port) !== relayPort) continue
-    if (typeof entry.extensionVersion === 'string') return entry.extensionVersion
+  const portStatus = Array.isArray(relayStatusSnapshot.ports)
+    ? relayStatusSnapshot.ports.find((entry) => entry && Number(entry.port) === relayPort)
+    : relayStatusSnapshot
+  if (!portStatus) return null
+  // Older relays expose only aggregate metadata. Modern aggregate fields belong
+  // to the latest heartbeat, which may be unrelated to this reader's target.
+  if (!Array.isArray(portStatus.browsers)) return portStatus
+  if (leasedBrowserId) {
+    return portStatus.browsers.find((entry) => entry?.browserId === leasedBrowserId) || null
   }
-  return null
+  if (Number.isInteger(leasedTabId)) {
+    const matches = portStatus.browsers.filter((entry) =>
+      Array.isArray(entry?.attachedTabs) && entry.attachedTabs.some((tab) => tab?.tabId === leasedTabId),
+    )
+    return matches.length === 1 ? matches[0] : null
+  }
+  return portStatus
+}
+
+function getObservedExtensionVersion() {
+  const status = getObservedExtensionStatus()
+  return typeof status?.extensionVersion === 'string' ? status.extensionVersion : null
 }
 
 function getObservedBrowserIdentity() {
-  if (!relayStatusSnapshot || typeof relayStatusSnapshot !== 'object') return null
-  if (relayStatusSnapshot.browser && typeof relayStatusSnapshot.browser === 'object') {
-    return sanitizeBrowserIdentity(relayStatusSnapshot.browser)
-  }
-  if (!Array.isArray(relayStatusSnapshot.ports)) return null
-  for (const entry of relayStatusSnapshot.ports) {
-    if (!entry || typeof entry !== 'object') continue
-    if (Number(entry.port) !== relayPort) continue
-    return sanitizeBrowserIdentity(entry.browser)
-  }
-  return null
+  return sanitizeBrowserIdentity(getObservedExtensionStatus()?.browser)
 }
 
 socket.addEventListener('open', () => {
